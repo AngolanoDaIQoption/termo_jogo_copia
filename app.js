@@ -1,5 +1,5 @@
 import { EstadoJogo, TEMAS } from "./state.js";
-import { DICIONARIO_PALAVRAS } from "./palavras.js";
+import { obterPalavraAleatoria, palavraExiste } from "./api.js";
 
 const gridEl = document.getElementById("grid");
 const keyboardEl = document.getElementById("keyboard");
@@ -9,10 +9,9 @@ const themeSelect = document.getElementById("theme-select");
 const bodyEl = document.getElementById("app-body");
 const mobileInput = document.getElementById("mobile-input");
 
-// Elementos do Modal
+// Elementos do Modal Autoral
 const modalEndgame = document.getElementById("modal-endgame");
 const modalCard = document.getElementById("modal-card");
-const modalIcon = document.getElementById("modal-icon");
 const modalTitle = document.getElementById("modal-title");
 const modalBody = document.getElementById("modal-body");
 const modalSecretWord = document.getElementById("modal-secret-word");
@@ -21,36 +20,21 @@ const modalBadge = document.getElementById("modal-badge");
 
 const CLASSES_FOCO = ['ring-2', 'ring-[#1447e6]', 'border-[#1447e6]'];
 
-// FILTRO RIGOROSO: Aceita EXATAMENTE 5 letras (descarta 4, 6 e 7 letras)
-const PALAVRAS_VALIDAS = DICIONARIO_PALAVRAS
-  .map(p => p.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase())
-  .filter(p => p.length === 5 && /^[A-Z]+$/.test(p));
-
-const dicionarioSet = new Set(PALAVRAS_VALIDAS);
-
 const TECLADO_LAYOUT = [
   ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
   ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
   ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACKSPACE"],
 ];
 
-function sortearPalavraLocal() {
-  const index = Math.floor(Math.random() * PALAVRAS_VALIDAS.length);
-  return PALAVRAS_VALIDAS[index];
-}
-
-function palavraExiste(palavra) {
-  if (!palavra) return false;
-  return dicionarioSet.has(palavra.toUpperCase());
-}
-
 async function inicializarJogo() {
   fecharModal();
-  statusEl.textContent = "Sorteando palavra...";
-  const palavra = sortearPalavraLocal();
+  statusEl.textContent = "Buscando palavra na API...";
+  
+  // Obtém palavra de 5 letras via API (ou fallback)
+  const palavra = await obterPalavraAleatoria();
   await EstadoJogo.resetar(palavra);
 
-  statusEl.textContent = `Palavra de ${EstadoJogo.tamanhoPalavra} letras`;
+  statusEl.textContent = "Adivinhe a palavra de 5 letras";
   renderizarGrade();
   renderizarTeclado();
   selecionarCelula(0, 0);
@@ -133,7 +117,7 @@ function encontrarProximaVazia(r, inicioCol) {
   return numCols - 1;
 }
 
-function tratarEntrada(tecla) {
+async function tratarEntrada(tecla) {
   if (EstadoJogo.fimDeJogo) return;
 
   const numCols = EstadoJogo.tamanhoPalavra;
@@ -157,11 +141,14 @@ function tratarEntrada(tecla) {
     const palpite = tentativaAtual.join("");
 
     if (tentativaAtual.length !== numCols || tentativaAtual.some((letra) => !letra)) {
-      statusEl.textContent = `Preencha todas as ${numCols} letras!`;
+      statusEl.textContent = "Preencha todas as 5 letras antes de confirmar!";
       return;
     }
 
-    if (!palavraExiste(palpite)) {
+    statusEl.textContent = "Validando palavra...";
+    const existe = await palavraExiste(palpite);
+
+    if (!existe) {
       statusEl.textContent = `A palavra "${palpite}" não existe no dicionário!`;
       return;
     }
@@ -200,6 +187,7 @@ function verificarPalpite() {
 
   const resultado = Array(numCols).fill("cinza");
 
+  // PASSO 1: Marca letras verdes (posição exata)
   palpiteArr.forEach((letra, i) => {
     if (letra === secretaArr[i]) {
       resultado[i] = "verde";
@@ -207,6 +195,7 @@ function verificarPalpite() {
     }
   });
 
+  // PASSO 2: Marca letras amarelas (se houver saldo na secreta)
   palpiteArr.forEach((letra, i) => {
     if (resultado[i] !== "verde") {
       if (secretaArr.includes(letra) && contagemSecreta[letra] > 0) {
@@ -216,6 +205,7 @@ function verificarPalpite() {
     }
   });
 
+  // PASSO 3: Renderização de cores
   palpiteArr.forEach((letra, i) => {
     const tile = document.getElementById(`tile-${r}-${i}`);
     const keyBtn = document.getElementById(`key-${letra}`);
@@ -256,10 +246,7 @@ function verificarPalpite() {
   }
 }
 
-// Funções de Controle do Modal
-// Referência dos novos elementos do modal
-
-
+// Controle do Modal Autoral
 function abrirModal(vitoria) {
   modalSecretWord.textContent = EstadoJogo.palavraSecreta;
 
@@ -297,7 +284,7 @@ function fecharModal() {
   }, 200);
 }
 
-// Event Listeners
+// Listeners de Teclado e Ações
 mobileInput.addEventListener("input", (e) => {
   const valor = e.target.value.toUpperCase();
   if (valor.length > 0) {
