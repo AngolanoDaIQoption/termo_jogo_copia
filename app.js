@@ -1,5 +1,5 @@
 import { EstadoJogo, TEMAS } from "./state.js";
-import { obterPalavraAleatoria, palavraExiste } from "./api.js";
+import { DICIONARIO_PALAVRAS } from "./palavras.js";
 
 const gridEl = document.getElementById("grid");
 const keyboardEl = document.getElementById("keyboard");
@@ -7,7 +7,26 @@ const statusEl = document.getElementById("status-message");
 const btnRestart = document.getElementById("btn-restart");
 const themeSelect = document.getElementById("theme-select");
 const bodyEl = document.getElementById("app-body");
+const mobileInput = document.getElementById("mobile-input");
+
+// Elementos do Modal
+const modalEndgame = document.getElementById("modal-endgame");
+const modalCard = document.getElementById("modal-card");
+const modalIcon = document.getElementById("modal-icon");
+const modalTitle = document.getElementById("modal-title");
+const modalBody = document.getElementById("modal-body");
+const modalSecretWord = document.getElementById("modal-secret-word");
+const modalBtnRestart = document.getElementById("modal-btn-restart");
+const modalBadge = document.getElementById("modal-badge");
+
 const CLASSES_FOCO = ['ring-2', 'ring-[#1447e6]', 'border-[#1447e6]'];
+
+// FILTRO RIGOROSO: Aceita EXATAMENTE 5 letras (descarta 4, 6 e 7 letras)
+const PALAVRAS_VALIDAS = DICIONARIO_PALAVRAS
+  .map(p => p.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase())
+  .filter(p => p.length === 5 && /^[A-Z]+$/.test(p));
+
+const dicionarioSet = new Set(PALAVRAS_VALIDAS);
 
 const TECLADO_LAYOUT = [
   ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
@@ -15,32 +34,47 @@ const TECLADO_LAYOUT = [
   ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACKSPACE"],
 ];
 
-async function inicializarJogo() {
-  statusEl.textContent = "Carregando palavra...";
-  const palavra = await obterPalavraAleatoria();
-  EstadoJogo.resetar(palavra);
+function sortearPalavraLocal() {
+  const index = Math.floor(Math.random() * PALAVRAS_VALIDAS.length);
+  return PALAVRAS_VALIDAS[index];
+}
 
-  statusEl.textContent = "Adivinhe a palavra de 5 letras";
+function palavraExiste(palavra) {
+  if (!palavra) return false;
+  return dicionarioSet.has(palavra.toUpperCase());
+}
+
+async function inicializarJogo() {
+  fecharModal();
+  statusEl.textContent = "Sorteando palavra...";
+  const palavra = sortearPalavraLocal();
+  await EstadoJogo.resetar(palavra);
+
+  statusEl.textContent = `Palavra de ${EstadoJogo.tamanhoPalavra} letras`;
   renderizarGrade();
   renderizarTeclado();
-  selecionarCelula(0, 0); // Seleciona a primeira célula por padrão
+  selecionarCelula(0, 0);
 }
 
 function renderizarGrade() {
   gridEl.innerHTML = "";
+  const numCols = EstadoJogo.tamanhoPalavra;
+
   for (let r = 0; r < 6; r++) {
     const row = document.createElement("div");
-    row.className = "flex gap-2";
-    for (let c = 0; c < 5; c++) {
+    row.className = "flex gap-2 justify-center";
+
+    for (let c = 0; c < numCols; c++) {
       const tile = document.createElement("div");
       tile.id = `tile-${r}-${c}`;
-      tile.className =
-        "w-12 h-12 border-2 border-slate-700 flex items-center justify-center text-xl font-bold rounded uppercase transition-all duration-300 cursor-pointer select-none";
+      
+      const tileSize = numCols > 5 ? "w-10 h-10 text-lg" : "w-12 h-12 text-xl";
+      tile.className = `${tileSize} border-2 border-slate-700 flex items-center justify-center font-bold rounded uppercase transition-all duration-300 cursor-pointer select-none`;
 
-      // Evento de clique para permitir seleção manual da célula
       tile.addEventListener("click", () => {
         if (r === EstadoJogo.linhaAtual && !EstadoJogo.fimDeJogo) {
           selecionarCelula(r, c);
+          mobileInput.focus();
         }
       });
 
@@ -51,7 +85,6 @@ function renderizarGrade() {
 }
 
 function selecionarCelula(r, c) {
-  // Remove destaque anterior
   if (EstadoJogo.celulaSelecionada) {
     const [oldR, oldC] = EstadoJogo.celulaSelecionada;
     const oldTile = document.getElementById(`tile-${oldR}-${oldC}`);
@@ -60,7 +93,6 @@ function selecionarCelula(r, c) {
     }
   }
 
-  // Aplica novo destaque
   EstadoJogo.celulaSelecionada = [r, c];
   EstadoJogo.colunaAtual = c;
   const tile = document.getElementById(`tile-${r}-${c}`);
@@ -82,7 +114,7 @@ function renderizarTeclado() {
         key === "ENTER" || key === "BACKSPACE"
           ? "px-3 text-xs flex-1 font-bold"
           : "w-9 text-sm font-semibold";
-      btn.className = `${width} h-12 bg-slate-700 text-white rounded hover:bg-slate-600 transition flex items-center justify-center`;
+      btn.className = `${width} h-12 bg-slate-700 text-white rounded hover:bg-slate-600 transition flex items-center justify-center cursor-pointer`;
 
       btn.addEventListener("click", () => tratarEntrada(key));
       rowEl.appendChild(btn);
@@ -91,44 +123,56 @@ function renderizarTeclado() {
   });
 }
 
+function encontrarProximaVazia(r, inicioCol) {
+  const numCols = EstadoJogo.tamanhoPalavra;
+  for (let col = inicioCol; col < numCols; col++) {
+    if (EstadoJogo.tentativas[r][col] === "") {
+      return col;
+    }
+  }
+  return numCols - 1;
+}
+
 function tratarEntrada(tecla) {
   if (EstadoJogo.fimDeJogo) return;
 
-  const [r, c] = EstadoJogo.celulaSelecionada || [
-    EstadoJogo.linhaAtual,
-    EstadoJogo.colunaAtual,
-  ];
+  const numCols = EstadoJogo.tamanhoPalavra;
+  const [r, c] = EstadoJogo.celulaSelecionada || [EstadoJogo.linhaAtual, EstadoJogo.colunaAtual];
 
   if (tecla === "ARROWLEFT") {
     if (c > 0) selecionarCelula(r, c - 1);
   } else if (tecla === "ARROWRIGHT") {
-    if (c < 4) selecionarCelula(r, c + 1);
+    if (c < numCols - 1) selecionarCelula(r, c + 1);
   } else if (tecla === "BACKSPACE") {
-    EstadoJogo.tentativas[r][c] = "";
-    atualizarTile(r, c, "");
-    if (c > 0) selecionarCelula(r, c - 1);
+    if (EstadoJogo.tentativas[r][c] !== "") {
+      EstadoJogo.tentativas[r][c] = "";
+      atualizarTile(r, c, "");
+    } else if (c > 0) {
+      selecionarCelula(r, c - 1);
+      EstadoJogo.tentativas[r][c - 1] = "";
+      atualizarTile(r, c - 1, "");
+    }
   } else if (tecla === "ENTER") {
     const tentativaAtual = EstadoJogo.tentativas[EstadoJogo.linhaAtual];
     const palpite = tentativaAtual.join("");
 
-    // 1. Verifica se todas as 5 células estão preenchidas
-    if (tentativaAtual.length !== 5 || tentativaAtual.some((letra) => !letra)) {
-      statusEl.textContent = "Preencha todas as 5 letras antes de confirmar!";
+    if (tentativaAtual.length !== numCols || tentativaAtual.some((letra) => !letra)) {
+      statusEl.textContent = `Preencha todas as ${numCols} letras!`;
       return;
     }
 
-    // 2. Valida se a palavra existe no dicionário
     if (!palavraExiste(palpite)) {
       statusEl.textContent = `A palavra "${palpite}" não existe no dicionário!`;
       return;
     }
 
-    // Se passou pelas validações, envia o palpite
     verificarPalpite();
   } else if (/^[A-Z]$/.test(tecla)) {
     EstadoJogo.tentativas[r][c] = tecla;
     atualizarTile(r, c, tecla);
-    if (c < 4) selecionarCelula(r, c + 1);
+
+    const proximaVazia = encontrarProximaVazia(r, c + 1);
+    selecionarCelula(r, proximaVazia);
   }
 }
 
@@ -142,61 +186,134 @@ function verificarPalpite() {
   const palpiteArr = EstadoJogo.tentativas[r];
   const palpite = palpiteArr.join("");
   const secretaArr = EstadoJogo.palavraSecreta.split("");
+  const numCols = EstadoJogo.tamanhoPalavra;
 
-  // Remove o anel de foco da linha confirmada
-  const currentTile = document.getElementById(
-    `tile-${r}-${EstadoJogo.colunaAtual}`,
-  );
-  if (currentTile) {
-    currentTile.classList.remove(...CLASSES_FOCO);
-  }
+  const currentTile = document.getElementById(`tile-${r}-${EstadoJogo.colunaAtual}`);
+  if (currentTile) currentTile.classList.remove(...CLASSES_FOCO);
+
+  const tileSize = numCols > 5 ? "w-10 h-10 text-lg" : "w-12 h-12 text-xl";
+
+  const contagemSecreta = {};
+  secretaArr.forEach((letra) => {
+    contagemSecreta[letra] = (contagemSecreta[letra] || 0) + 1;
+  });
+
+  const resultado = Array(numCols).fill("cinza");
+
+  palpiteArr.forEach((letra, i) => {
+    if (letra === secretaArr[i]) {
+      resultado[i] = "verde";
+      contagemSecreta[letra]--;
+    }
+  });
+
+  palpiteArr.forEach((letra, i) => {
+    if (resultado[i] !== "verde") {
+      if (secretaArr.includes(letra) && contagemSecreta[letra] > 0) {
+        resultado[i] = "amarelo";
+        contagemSecreta[letra]--;
+      }
+    }
+  });
 
   palpiteArr.forEach((letra, i) => {
     const tile = document.getElementById(`tile-${r}-${i}`);
     const keyBtn = document.getElementById(`key-${letra}`);
+    const cor = resultado[i];
 
-    if (letra === secretaArr[i]) {
-      tile.className =
-        "w-12 h-12 bg-green-600 text-white flex items-center justify-center text-xl font-bold rounded uppercase";
-      if (keyBtn)
-        keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-green-600");
-    } else if (secretaArr.includes(letra)) {
-      tile.className =
-        "w-12 h-12 bg-yellow-500 text-white flex items-center justify-center text-xl font-bold rounded uppercase";
+    if (cor === "verde") {
+      tile.className = `${tileSize} bg-green-600 text-white flex items-center justify-center font-bold rounded uppercase`;
+      if (keyBtn) keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-green-600");
+    } else if (cor === "amarelo") {
+      tile.className = `${tileSize} bg-yellow-500 text-white flex items-center justify-center font-bold rounded uppercase`;
       if (keyBtn && !keyBtn.classList.contains("bg-green-600")) {
         keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-yellow-500");
       }
     } else {
-      tile.className =
-        "w-12 h-12 bg-zinc-700 text-slate-300 flex items-center justify-center text-xl font-bold rounded uppercase";
+      tile.className = `${tileSize} bg-zinc-700 text-slate-300 flex items-center justify-center font-bold rounded uppercase`;
       if (
         keyBtn &&
         !keyBtn.classList.contains("bg-green-600") &&
         !keyBtn.classList.contains("bg-yellow-500")
       ) {
-        keyBtn.className = keyBtn.className.replace(
-          /bg-\S+/,
-          "bg-zinc-800 text-zinc-500",
-        );
+        keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-zinc-800 text-zinc-500");
       }
     }
   });
 
   if (palpite === EstadoJogo.palavraSecreta) {
-    statusEl.textContent = "Parabéns! Você venceu! 🎉";
+    statusEl.textContent = "Parabéns! Você venceu!";
     EstadoJogo.fimDeJogo = true;
+    setTimeout(() => abrirModal(true), 600);
   } else if (r === 5) {
     statusEl.textContent = `Fim de jogo! A palavra era: ${EstadoJogo.palavraSecreta}`;
     EstadoJogo.fimDeJogo = true;
+    setTimeout(() => abrirModal(false), 600);
   } else {
     EstadoJogo.linhaAtual++;
     statusEl.textContent = "Tente novamente...";
-    selecionarCelula(EstadoJogo.linhaAtual, 0); // Foca no primeiro quadrado da nova linha
+    selecionarCelula(EstadoJogo.linhaAtual, 0);
   }
 }
 
-// Event Listeners Físicos e de Interface
+// Funções de Controle do Modal
+// Referência dos novos elementos do modal
+
+
+function abrirModal(vitoria) {
+  modalSecretWord.textContent = EstadoJogo.palavraSecreta;
+
+  if (vitoria) {
+    modalBadge.textContent = "Vitória";
+    modalBadge.className = "px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+    modalTitle.textContent = "Palavra Adivinhada!";
+    modalTitle.className = "text-2xl font-extrabold text-white tracking-tight";
+    modalBody.textContent = `Resolvido em ${EstadoJogo.linhaAtual + 1} tentativa(s).`;
+    modalBtnRestart.className = "w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-3 px-6 rounded-xl shadow-lg hover:shadow-emerald-900/30 active:scale-[0.98] transition-all duration-200 cursor-pointer";
+  } else {
+    modalBadge.textContent = "Derrota";
+    modalBadge.className = "px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20";
+    modalTitle.textContent = "Tentativas Esgotadas";
+    modalTitle.className = "text-2xl font-extrabold text-white tracking-tight";
+    modalBody.textContent = "Não foi desta vez. Tente novamente!";
+    modalBtnRestart.className = "w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm py-3 px-6 rounded-xl border border-slate-700 active:scale-[0.98] transition-all duration-200 cursor-pointer";
+  }
+
+  modalEndgame.classList.remove("hidden");
+  modalEndgame.classList.add("flex");
+
+  setTimeout(() => {
+    modalCard.classList.remove("scale-95", "opacity-0");
+    modalCard.classList.add("scale-100", "opacity-100");
+  }, 10);
+}
+
+function fecharModal() {
+  modalCard.classList.remove("scale-100", "opacity-100");
+  modalCard.classList.add("scale-95", "opacity-0");
+  setTimeout(() => {
+    modalEndgame.classList.remove("flex");
+    modalEndgame.classList.add("hidden");
+  }, 200);
+}
+
+// Event Listeners
+mobileInput.addEventListener("input", (e) => {
+  const valor = e.target.value.toUpperCase();
+  if (valor.length > 0) {
+    const ultimaLetra = valor[valor.length - 1];
+    if (/^[A-Z]$/.test(ultimaLetra)) {
+      tratarEntrada(ultimaLetra);
+    }
+  }
+  mobileInput.value = "";
+});
+
 document.addEventListener("keydown", (e) => {
+  if (document.activeElement === mobileInput && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
+    return;
+  }
+
   const tecla = e.key.toUpperCase();
   if (
     tecla === "ENTER" ||
@@ -205,20 +322,19 @@ document.addEventListener("keydown", (e) => {
     tecla === "ARROWRIGHT" ||
     /^[A-Z]$/.test(tecla)
   ) {
-    // Evita que a seta role a página
     if (e.key.startsWith("Arrow")) e.preventDefault();
     tratarEntrada(tecla);
   }
 });
 
 btnRestart.addEventListener("click", inicializarJogo);
+modalBtnRestart.addEventListener("click", inicializarJogo);
 
 themeSelect.addEventListener("change", (e) => {
   const tema = TEMAS[e.target.value];
   if (tema) {
-    bodyEl.className = `${tema.body} min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300`;
+    bodyEl.className = `${tema.body} min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300 select-none relative`;
   }
 });
 
-// Inicializa ao carregar a página
 inicializarJogo();
