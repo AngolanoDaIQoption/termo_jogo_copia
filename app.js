@@ -7,7 +7,6 @@ const statusEl = document.getElementById("status-message");
 const btnRestart = document.getElementById("btn-restart");
 const themeSelect = document.getElementById("theme-select");
 const bodyEl = document.getElementById("app-body");
-const mobileInput = document.getElementById("mobile-input");
 
 // Elementos do Modal Autoral
 const modalEndgame = document.getElementById("modal-endgame");
@@ -58,7 +57,6 @@ function renderizarGrade() {
       tile.addEventListener("click", () => {
         if (r === EstadoJogo.linhaAtual && !EstadoJogo.fimDeJogo) {
           selecionarCelula(r, c);
-          mobileInput.focus();
         }
       });
 
@@ -285,22 +283,7 @@ function fecharModal() {
 }
 
 // Listeners de Teclado e Ações
-mobileInput.addEventListener("input", (e) => {
-  const valor = e.target.value.toUpperCase();
-  if (valor.length > 0) {
-    const ultimaLetra = valor[valor.length - 1];
-    if (/^[A-Z]$/.test(ultimaLetra)) {
-      tratarEntrada(ultimaLetra);
-    }
-  }
-  mobileInput.value = "";
-});
-
 document.addEventListener("keydown", (e) => {
-  if (document.activeElement === mobileInput && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
-    return;
-  }
-
   const tecla = e.key.toUpperCase();
   if (
     tecla === "ENTER" ||
@@ -309,7 +292,7 @@ document.addEventListener("keydown", (e) => {
     tecla === "ARROWRIGHT" ||
     /^[A-Z]$/.test(tecla)
   ) {
-    if (e.key.startsWith("Arrow")) e.preventDefault();
+    e.preventDefault();
     tratarEntrada(tecla);
   }
 });
