@@ -1,60 +1,60 @@
-import { DICIONARIO_PALAVRAS } from "./palavras.js";
+let dicionarioSet = new Set();
+let palavrasSorteio = [];
 
-// Cache local para guardar palavras já validadas durante a partida
-const dicionarioCache = new Set(
-  DICIONARIO_PALAVRAS.map((p) => normalizar(p))
-);
+// URL de uma Wordlist completa de palavras em português (sem acento)
+const URL_DICIONARIO = "https://raw.githubusercontent.com/pythonprobr/palavras/main/palavras.json";
 
+/**
+ * Normaliza textos (remove acentos e deixa em caixa alta)
+ */
 function normalizar(texto) {
   return texto ? texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
 }
 
 /**
- * Busca uma palavra aleatória de 5 letras
+ * Carrega a lista completa de palavras na memória (executado 1 vez ao iniciar)
  */
-export async function obterPalavraAleatoria() {
-  try {
-    // Tenta buscar via API pública do Dicio
-    const res = await fetch("https://api.dicio-api-busca.vercel.app/words/random");
-    if (!res.ok) throw new Error(`Status ${res.status}`);
-    
-    const dados = await res.json();
-    const palavraLimpa = normalizar(dados.word || dados.palavra || "");
+async function carregarDicionario() {
+  if (dicionarioSet.size > 0) return;
 
-    if (palavraLimpa.length === 5 && /^[A-Z]+$/.test(palavraLimpa)) {
-      dicionarioCache.add(palavraLimpa);
-      return palavraLimpa;
-    } else {
-      return await obterPalavraAleatoria();
-    }
+  try {
+    const res = await fetch(URL_DICIONARIO);
+    if (!res.ok) throw new Error("Erro ao baixar dicionário");
+    
+    const listaGeral = await res.json();
+
+    // Filtra estritamente palavras de 5 letras sem acento
+    listaGeral.forEach((item) => {
+      const palavraLimpa = normalizar(item);
+      if (palavraLimpa.length === 5 && /^[A-Z]+$/.test(palavraLimpa)) {
+        dicionarioSet.add(palavraLimpa);
+      }
+    });
+
+    palavrasSorteio = Array.from(dicionarioSet);
   } catch (erro) {
-    console.warn("API indisponível ou bloqueada pela rede. Usando sorteio local fallback.", erro);
-    const index = Math.floor(Math.random() * DICIONARIO_PALAVRAS.length);
-    return normalizar(DICIONARIO_PALAVRAS[index]);
+    console.warn("Erro ao carregar dicionário remoto, aplicando lista local de emergência:", erro);
+    // Lista reserva caso esteja totalmente offline
+    const fallback = ["TERMO", "SENAI", "TRAIU", "MATOU", "PELOS", "LOUCO", "CARRO", "PRAIA", "PORTA", "TEXTO"];
+    fallback.forEach(p => dicionarioSet.add(p));
+    palavrasSorteio = fallback;
   }
 }
 
 /**
- * Valida se a palavra existe (API em tempo real com fallback)
+ * Sortear palavra secreta
+ */
+export async function obterPalavraAleatoria() {
+  await carregarDicionario();
+  const index = Math.floor(Math.random() * palavrasSorteio.length);
+  return palavrasSorteio[index];
+}
+
+/**
+ * Valida o palpite do jogador (aceita TRAIU, falou, comeu, etc.)
  */
 export async function palavraExiste(palavra) {
   if (!palavra || palavra.length !== 5) return false;
-  const palavraUpper = normalizar(palavra);
-  
-  // 1. Se já está no cache ou no dicionário local, valida imediatamente
-  if (dicionarioCache.has(palavraUpper)) return true;
-
-  try {
-    // 2. Consulta a API para verificar se a palavra existe na língua portuguesa
-    const res = await fetch(`https://api.dicio-api-busca.vercel.app/words/${palavraUpper.toLowerCase()}`);
-    if (res.ok) {
-      dicionarioCache.add(palavraUpper);
-      return true;
-    }
-    return false;
-  } catch (erro) {
-    // 3. Caso a rede bloqueie a API, aceita o palpite de 5 letras para não travar o jogador
-    console.warn("Rede bloqueou a consulta da API, aplicando validação permissiva de fallback.");
-    return true; 
-  }
+  await carregarDicionario();
+  return dicionarioSet.has(normalizar(palavra));
 }
