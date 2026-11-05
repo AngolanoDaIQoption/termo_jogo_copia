@@ -260,7 +260,7 @@ function abrirModal(vitoria) {
     modalBadge.className = "px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20";
     modalTitle.textContent = "Tentativas Esgotadas";
     modalTitle.className = "text-2xl font-extrabold text-white tracking-tight";
-    modalBody.textContent = "Não foi desta vez. Tente novamente!";
+    modalBody.textContent = "Faz o L. Tente novamente!";
     modalBtnRestart.className = "w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm py-3 px-6 rounded-xl border border-slate-700 active:scale-[0.98] transition-all duration-200 cursor-pointer";
   }
 
