@@ -15,6 +15,27 @@
       background: rgba(17, 24, 39, 0.85);
       backdrop-filter: blur(12px);
     }
+
+    /* Scrollbar Estilizada Dark */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    /* Firefox */
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(51, 65, 85, 0.8) rgba(15, 23, 42, 0.6);
+    }
   </style>
 </head>
 <body id="app-body" class="bg-[#0b0f17] text-slate-100 min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300 select-none relative">
@@ -26,6 +47,10 @@
       <h1 class="text-xl font-extrabold tracking-widest text-white uppercase">TERMO</h1>
     </div>
     <div class="flex items-center gap-2">
+      <!-- Botão de Ranking Top 10 -->
+      <button id="btn-leaderboard" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 font-semibold text-xs px-2.5 py-1.5 rounded-lg transition active:scale-95 cursor-pointer">
+        🏆 Ranking
+      </button>
       <select id="theme-select" class="bg-slate-900 text-xs font-semibold text-slate-300 border border-slate-800 rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-slate-700 transition">
         <option value="dark">Dark</option>
         <option value="cyberpunk">Cyberpunk</option>
@@ -50,8 +75,8 @@
   <footer id="keyboard" class="w-full max-w-md flex flex-col gap-1.5 pb-2"></footer>
 
   <!-- Modal de Fim de Jogo Autoral -->
-  <div id="modal-endgame" class="fixed inset-0 bg-[#070a0f]/80 backdrop-blur-md hidden items-center justify-center p-4 z-50 transition-opacity duration-300">
-    <div id="modal-card" class="glass-card border border-slate-800/90 rounded-2xl p-6 max-w-xs sm:max-w-sm w-full text-center shadow-2xl flex flex-col items-center gap-5 transition-all duration-300 scale-95 opacity-0">
+  <div id="modal-endgame" class="fixed inset-0 bg-[#070a0f]/80 backdrop-blur-md hidden items-center justify-center p-4 z-40 transition-opacity duration-300">
+    <div id="modal-card" class="glass-card border border-slate-800/90 rounded-2xl p-6 max-w-xs sm:max-w-sm w-full text-center shadow-2xl flex flex-col items-center gap-4 transition-all duration-300 scale-95 opacity-0">
       
       <!-- Badge de Resultado -->
       <div id="modal-badge" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -63,7 +88,7 @@
         <p id="modal-body" class="text-xs font-medium text-slate-400">Você adivinhou a palavra com sucesso.</p>
       </div>
       
-      <!-- Palavra Secreta Relevada -->
+      <!-- Palavra Secreta Revelada -->
       <div class="bg-slate-900/90 w-full py-3 px-4 rounded-xl border border-slate-800">
         <span class="text-[10px] text-slate-500 block uppercase tracking-widest font-bold mb-0.5">Palavra Secreta</span>
         <span id="modal-secret-word" class="text-2xl font-black text-emerald-400 tracking-[0.25em]">---</span>
@@ -76,6 +101,109 @@
     </div>
   </div>
 
+  <!-- Modal Seleção de Avatares (3 por linha + Scrollbar customizada) -->
+  <div id="modal-avatar-selector" class="fixed inset-0 bg-[#070a0f]/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+    <div class="glass-card border border-slate-800/90 rounded-2xl p-5 max-w-xs sm:max-w-md w-full shadow-2xl flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="text-sm font-bold text-white tracking-wider uppercase">Escolha seu Avatar</h3>
+          <p class="text-[11px] text-slate-400 font-medium">Selecione a imagem para o seu registro</p>
+        </div>
+        <button id="btn-close-avatar-modal" class="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer transition">✕</button>
+      </div>
+
+      <!-- Grid 3 por linha com Scrollbar estilizada -->
+      <div id="avatar-grid-container" class="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar"></div>
+
+      <button id="btn-confirm-avatar" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 rounded-xl transition cursor-pointer">
+        Confirmar Escolha
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal do Ranking Top 10 -->
+  <div id="modal-ranking" class="fixed inset-0 bg-[#070a0f]/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+    <div class="glass-card border border-slate-800/90 rounded-2xl p-5 max-w-xs sm:max-w-sm w-full shadow-2xl flex flex-col gap-3">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-2.5">
+        <h3 class="text-sm font-bold text-white tracking-wider uppercase">🏆 Top 10 Menores Tempos</h3>
+        <button id="btn-close-ranking" class="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer">✕</button>
+      </div>
+      <div id="ranking-list-container" class="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar"></div>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
+  <script type="module">
+    import { obterLeaderboard } from "./app.js";
+    import { obterSrcAvatar } from "./avatars.js";
+
+    const btnLb = document.getElementById("btn-leaderboard");
+    const modalRanking = document.getElementById("modal-ranking");
+    const btnCloseRanking = document.getElementById("btn-close-ranking");
+    const listContainer = document.getElementById("ranking-list-container");
+
+    function formatarTempo(ms) {
+      const totalSeg = Math.floor(ms / 1000);
+      const min = Math.floor(totalSeg / 60);
+      const seg = totalSeg % 60;
+      const msResto = Math.floor((ms % 1000) / 10);
+      return `${String(min).padStart(2, '0')}:${String(seg).padStart(2, '0')}.${String(msResto).padStart(2, '0')}`;
+    }
+
+    btnLb.addEventListener("click", async () => {
+      listContainer.innerHTML = `<span class="text-xs text-slate-400 text-center py-4">Carregando ranking...</span>`;
+      modalRanking.classList.remove("hidden");
+      modalRanking.classList.add("flex");
+
+      try {
+        const dados = await obterLeaderboard();
+        const lista = Array.isArray(dados)
+          ? dados
+          : dados && Array.isArray(dados.record)
+            ? dados.record
+            : [];
+
+        if (lista.length === 0) {
+          listContainer.innerHTML = `<span class="text-xs text-slate-500 text-center py-4">Nenhum recorde registrado ainda.</span>`;
+          return;
+        }
+
+        listContainer.replaceChildren();
+        lista.forEach((item, idx) => {
+          const row = document.createElement("div");
+          row.className = "flex justify-between items-center bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/80 text-xs";
+
+          const playerWrapper = document.createElement("div");
+          playerWrapper.className = "flex items-center gap-2.5";
+
+          const img = document.createElement("img");
+          img.src = obterSrcAvatar(item.avatar);
+          img.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-slate-700";
+          img.alt = "avatar";
+
+          const player = document.createElement("span");
+          player.className = "font-medium text-slate-200";
+          player.textContent = `#${idx + 1} ${item.nome || "JOGADOR"}`;
+
+          playerWrapper.append(img, player);
+
+          const time = document.createElement("span");
+          time.className = "font-mono text-amber-400 font-semibold";
+          time.textContent = formatarTempo(item.tempoMs);
+
+          row.append(playerWrapper, time);
+          listContainer.appendChild(row);
+        });
+      } catch (err) {
+        console.error("Erro ao montar modal de ranking:", err);
+        listContainer.innerHTML = `<span class="text-xs text-rose-400 text-center py-4">Erro ao carregar ranking.</span>`;
+      }
+    });
+
+    btnCloseRanking.addEventListener("click", () => {
+      modalRanking.classList.remove("flex");
+      modalRanking.classList.add("hidden");
+    });
+  </script>
 </body>
 </html>
