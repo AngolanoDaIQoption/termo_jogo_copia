@@ -500,8 +500,8 @@ async function abrirModal(vitoria) {
             </button>
           </div>
           <div class="flex gap-2">
-            <input type="text" id="record-name-input" maxlength="10" placeholder="SEU NOME" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 focus:outline-none uppercase" />
-            <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-lg transition cursor-pointer">Salvar</button>
+            <input type="text" id="record-name-input" maxlength="14" placeholder="SEU NOME" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase" />
+            <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
           </div>
         </div>
       `;
