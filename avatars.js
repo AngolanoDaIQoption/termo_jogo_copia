@@ -7,7 +7,7 @@ export const AVATARES = [
   { id: "pai", nome: "Pai de familia", src: "./assets/avatars/pai.png" },
   { id: "galo", nome: "Galo cego", src: "./assets/avatars/galo.png" },
   { id: "calabreso", nome: "Davi Brito", src: "./assets/avatars/calabreso.png" },
-  { id: "patrick", nome: "Patrick: lost in the sauce", src: "./assets/avatars/patrick.png"},
+  { id: "patrick", nome: "Lost in the sauce", src: "./assets/avatars/patrick.png"},
   { id: "obvio", nome: "Era tão óbvio", src: "./assets/avatars/obvio.png"},
   { id: "vorcaro", nome: "Vorcaro", src: "./assets/avatars/vorcaro.png"},
 ];
