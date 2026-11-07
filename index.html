@@ -193,7 +193,10 @@
         listContainer.replaceChildren();
         lista.forEach((item, idx) => {
           const row = document.createElement("div");
-          row.className = "flex justify-between items-center bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/80 text-xs";
+          row.className = "flex flex-col bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 text-xs gap-1.5";
+
+          const topRow = document.createElement("div");
+          topRow.className = "flex justify-between items-center";
 
           const playerWrapper = document.createElement("div");
           playerWrapper.className = "flex items-center gap-2.5";
@@ -213,7 +216,18 @@
           time.className = "font-mono text-amber-400 font-semibold";
           time.textContent = formatarTempo(item.tempoMs);
 
-          row.append(playerWrapper, time);
+          topRow.append(playerWrapper, time);
+          row.appendChild(topRow);
+
+          // Renderização do Histórico
+          const temHistorico = Array.isArray(item.historico) && item.historico.length > 0;
+          const palpitesStr = temHistorico ? item.historico.join(" ➔ ") : "Sem histórico";
+
+          const histRow = document.createElement("div");
+          histRow.className = "bg-slate-950/50 px-2 py-1 rounded text-[10px] font-mono text-slate-400 flex items-center justify-between";
+          histRow.innerHTML = `<span class="text-slate-500 font-sans">Jogada:</span> <span class="text-emerald-400/90 font-bold tracking-wide">${palpitesStr}</span>`;
+
+          row.appendChild(histRow);
           listContainer.appendChild(row);
         });
       } catch (err) {
