@@ -24,23 +24,84 @@ const avatarGridContainer = document.getElementById("avatar-grid-container");
 const btnCloseAvatarModal = document.getElementById("btn-close-avatar-modal");
 const btnConfirmAvatar = document.getElementById("btn-confirm-avatar");
 
+// Modal de Timeout
+const modalTimeout = document.getElementById("modal-timeout");
+const timeoutCountdown = document.getElementById("timeout-countdown");
+
 const CLASSES_FOCO = ['ring-2', 'ring-[#1447e6]', 'border-[#1447e6]'];
 const STORAGE_PARTIDA_KEY = "termo_partida_atual_v1";
 const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
+const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
 
 // Configuração do JSONbin (Access Key em Base64)
 const JSONBIN_BIN_ID = "6aed5519ffd5d16053aad2c0";
-const JSONBIN_ACCESS_KEY = atob("JDJhJDEwJDVxVzk2RzB2d1o3SDF3ODlPeTkySGVrQTZTQWJaTFo1TGJVY2FMNTEuWGdycDZlbDBSVWg2");
+const JSONBIN_ACCESS_KEY = atob("JDJhJDEwJDVxVzk2RzB2d1o3SDF3ODlPeTkySGVrQTZTQWJaTFo1TGJVY2FMNTEuWGdypDZlbDBSVWg2");
 
 let tempoInicio = null;
 let tempoFinalMs = 0;
 let avatarSelecionado = AVATARES[0].id;
+let timerInterval = null;
 
 const TECLADO_LAYOUT = [
   ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
   ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
   ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACKSPACE"],
 ];
+
+function checarTimeoutAtivo() {
+  const timeoutUntil = localStorage.getItem(STORAGE_TIMEOUT_KEY);
+  if (!timeoutUntil) return false;
+
+  const agora = Date.now();
+  const tempoRestanteMs = parseInt(timeoutUntil, 10) - agora;
+
+  if (tempoRestanteMs > 0) {
+    exibirTelaDeTimeout(tempoRestanteMs);
+    return true;
+  } else {
+    localStorage.removeItem(STORAGE_TIMEOUT_KEY);
+    modalTimeout.classList.remove("flex");
+    modalTimeout.classList.add("hidden");
+    return false;
+  }
+}
+
+function aplicarPunicaoTimeout(minutos = 30) {
+  const tempoFinal = Date.now() + minutos * 60 * 1000;
+  localStorage.setItem(STORAGE_TIMEOUT_KEY, tempoFinal.toString());
+  fecharModal();
+  checarTimeoutAtivo();
+}
+
+function exibirTelaDeTimeout(msRestantes) {
+  modalTimeout.classList.remove("hidden");
+  modalTimeout.classList.add("flex");
+
+  if (timerInterval) clearInterval(timerInterval);
+
+  function atualizarContador() {
+    const agora = Date.now();
+    const timeoutUntil = parseInt(localStorage.getItem(STORAGE_TIMEOUT_KEY) || "0", 10);
+    const restante = timeoutUntil - agora;
+
+    if (restante <= 0) {
+      clearInterval(timerInterval);
+      localStorage.removeItem(STORAGE_TIMEOUT_KEY);
+      modalTimeout.classList.remove("flex");
+      modalTimeout.classList.add("hidden");
+      inicializarJogo(true);
+      return;
+    }
+
+    const totalSeg = Math.floor(restante / 1000);
+    const min = Math.floor(totalSeg / 60);
+    const seg = totalSeg % 60;
+    timeoutCountdown.textContent = `00:${String(min).padStart(2, '0')}:${String(seg).padStart(2, '0')}`;
+  }
+
+  atualizarContador();
+  timerInterval = setInterval(atualizarContador, 1000);
+}
 
 function salvarEstadoLocal() {
   const dados = {
@@ -59,6 +120,8 @@ function limparEstadoSalvo() {
 }
 
 async function inicializarJogo(forcadoNovoJogo = false) {
+  if (checarTimeoutAtivo()) return;
+
   fecharModal();
   tempoInicio = null;
   tempoFinalMs = 0;
@@ -406,7 +469,7 @@ export async function salvarNovoRecorde(nome, tempoMs, avatarId = "doge") {
   }
 }
 
-// Abrir Modal de Avatares Ampliado (3 por linha + Zoom)
+// Abrir Modal de Avatares
 function abrirModalDeAvatares() {
   avatarGridContainer.innerHTML = AVATARES.map((item) => `
     <div 
@@ -460,7 +523,6 @@ async function abrirModal(vitoria) {
     const tempoStr = formatarTempo(tempoFinalMs);
     const leaderboard = await obterLeaderboard();
     
-    // É recorde se a lista tiver menos de 10 itens OU se o tempo for menor que o último colocado
     const piorTempoCadastrado = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].tempoMs : Infinity;
     const ehNovoRecorde = leaderboard.length < 10 || tempoFinalMs < piorTempoCadastrado;
 
@@ -500,7 +562,16 @@ async function abrirModal(vitoria) {
             </button>
           </div>
           <div class="flex gap-2">
-            <input type="text" id="record-name-input" maxlength="14" placeholder="SEU NOME" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase" />
+            <input 
+              type="text" 
+              id="record-name-input" 
+              maxlength="15" 
+              placeholder="SEU NOME" 
+              autocomplete="off" 
+              autocorrect="off" 
+              spellcheck="false" 
+              class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase" 
+            />
             <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
           </div>
         </div>
@@ -535,11 +606,18 @@ async function abrirModal(vitoria) {
         btnSave.addEventListener("click", async () => {
           const nameInput = document.getElementById("record-name-input");
           if (nameInput && nameInput.value) {
+            
+            // VERIFICAÇÃO TROLL: Se escolher o avatar armadilha, toma timeout de 30 minutos!
+            const avatarObjeto = AVATARES.find(a => a.id === avatarSelecionado);
+            if (avatarObjeto && avatarObjeto.troll) {
+              aplicarPunicaoTimeout(5);
+              return;
+            }
+
             btnSave.disabled = true;
-            btnSave.textContent = "Salvando...";
-            await salvarNovoRecorde(nameInput.value, tempoFinalMs, avatarSelecionado);
             btnSave.textContent = "Salvo ✓";
-            btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-3 py-2 rounded-lg";
+            btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg shrink-0 min-w-[72px] text-center";
+            await salvarNovoRecorde(nameInput.value, tempoFinalMs, avatarSelecionado);
           }
         });
       }
