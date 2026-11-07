@@ -15,7 +15,7 @@ export const AVATARES = [
   { id: "torcedor", nome: "Festa na roça", src: "./assets/avatars/torcedor.webp" },
   { id: "angolano", nome: "AngolanoIQOption", src: "./assets/avatars/angolano.png" },
   { id: "petista", nome: "Petista médio", src: "./assets/avatars/petista.png"},
-  { id: "pix", nome: "Pix da Silva", src: "./assets/avatars/pix.png"},
+  { id: "pix", nome: "Pix da Silva JR", src: "./assets/avatars/pix.png"},
 ];
 
 export const AVATAR_PADRAO = AVATARES[0];
