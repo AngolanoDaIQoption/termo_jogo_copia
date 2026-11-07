@@ -33,9 +33,9 @@ const STORAGE_PARTIDA_KEY = "termo_partida_atual_v1";
 const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
 const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
 
-// Configuração do JSONbin (Access Key em Base64)
+// Configuração do JSONbin
 const JSONBIN_BIN_ID = "6aed5519ffd5d16053aad2c0";
-const JSONBIN_ACCESS_KEY = atob("JDJhJDEwJDVxVzk2RzB2d1o3SDF3ODlPeTkySGVrQTZTQWJaTFo1TGJVY2FMNTEuWGdypDZlbDBSVWg2");
+const JSONBIN_ACCESS_KEY = "$2a$10$I5.3RabYO6Jt5mqWE.pOT.EnWOeAsBKYlHXUrx69WCRC9Z9nr454.";
 
 let tempoInicio = null;
 let tempoFinalMs = 0;
@@ -443,10 +443,16 @@ export async function obterLeaderboard() {
 export async function salvarNovoRecorde(nome, tempoMs, avatarId = "doge") {
   const listaAtual = await obterLeaderboard();
   
+  // CAPTURANDO O HISTÓRICO: Pega todas as palavras preenchidas na grade
+  const historicoPalpites = EstadoJogo.tentativas
+    .map(linha => linha.join(""))
+    .filter(palavra => palavra.length === EstadoJogo.tamanhoPalavra);
+
   listaAtual.push({ 
     nome: nome.trim().toUpperCase() || "JOGADOR", 
     tempoMs, 
     avatar: avatarId, 
+    historico: historicoPalpites, // Enviando o histórico para a nuvem
     data: new Date().toLocaleDateString() 
   });
 
