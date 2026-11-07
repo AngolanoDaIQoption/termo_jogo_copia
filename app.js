@@ -548,7 +548,9 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
 
 // Abrir Modal de Avatares
 function abrirModalDeAvatares() {
-  avatarGridContainer.innerHTML = AVATARES.map((item) => `
+  avatarGridContainer.innerHTML = AVATARES
+    .filter((item) => !item.oculto) // <--- ESTA LINHA ESCONDE O GARY
+    .map((item) => `
     <div 
       data-id="${item.id}"
       class="avatar-card-item flex flex-col items-center justify-between p-3 rounded-xl border-2 ${item.id === avatarSelecionado ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-900/50 opacity-70'} hover:opacity-100 cursor-pointer transition-all duration-150"
