@@ -32,6 +32,9 @@ const CLASSES_FOCO = ['ring-2', 'ring-[#1447e6]', 'border-[#1447e6]'];
 const STORAGE_PARTIDA_KEY = "termo_partida_atual_v1";
 const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
 const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
+const STORAGE_USER_PIN_KEY = "termo_user_pin";
+const STORAGE_USER_NAME_KEY = "termo_user_name";
+const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
 
 // Configuração do JSONbin
 const JSONBIN_BIN_ID = "6aed5519ffd5d16053aad2c0";
@@ -132,7 +135,9 @@ async function inicializarJogo(forcadoNovoJogo = false) {
     try {
       const raw = localStorage.getItem(STORAGE_PARTIDA_KEY);
       if (raw) partidaSalva = JSON.parse(raw);
-    } catch {}
+    } catch (err) {
+      console.warn("Falha ao restaurar a partida salva:", err);
+    }
   }
 
   if (partidaSalva && partidaSalva.palavraSecreta && !partidaSalva.fimDeJogo) {
@@ -358,23 +363,36 @@ function aplicarCoresNaLinha(r) {
     const keyBtn = document.getElementById(`key-${letra}`);
     const cor = resultado[i];
 
-    if (cor === "verde") {
-      tile.className = `${tileSize} bg-emerald-600 text-white flex items-center justify-center font-bold rounded uppercase`;
-      if (keyBtn) keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-emerald-600");
-    } else if (cor === "amarelo") {
-      tile.className = `${tileSize} bg-amber-500 text-white flex items-center justify-center font-bold rounded uppercase`;
-      if (keyBtn && !keyBtn.classList.contains("bg-emerald-600")) {
-        keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-amber-500");
+    if (tile) {
+      if (cor === "verde") {
+        tile.className = `${tileSize} bg-emerald-600 text-white flex items-center justify-center font-bold rounded uppercase`;
+      } else if (cor === "amarelo") {
+        tile.className = `${tileSize} bg-amber-500 text-white flex items-center justify-center font-bold rounded uppercase`;
+      } else {
+        tile.className = `${tileSize} bg-slate-800 text-slate-400 flex items-center justify-center font-bold rounded uppercase`;
       }
-    } else {
-      tile.className = `${tileSize} bg-slate-800 text-slate-400 flex items-center justify-center font-bold rounded uppercase`;
-      if (
-        keyBtn &&
-        !keyBtn.classList.contains("bg-emerald-600") &&
-        !keyBtn.classList.contains("bg-amber-500")
-      ) {
-        keyBtn.className = keyBtn.className.replace(/bg-\S+/, "bg-slate-800/60 text-slate-500");
-      }
+    }
+
+    if (!keyBtn) return;
+
+    const isVerde = keyBtn.classList.contains("bg-emerald-600");
+    const isAmarelo = keyBtn.classList.contains("bg-amber-500");
+    keyBtn.classList.remove("hover:bg-slate-600");
+
+    if (cor === "verde" && !isVerde) {
+      keyBtn.classList.remove(
+        "bg-slate-700",
+        "bg-amber-500",
+        "bg-slate-800/60",
+        "text-slate-500"
+      );
+      keyBtn.classList.add("bg-emerald-600", "text-white");
+    } else if (cor === "amarelo" && !isVerde && !isAmarelo) {
+      keyBtn.classList.remove("bg-slate-700", "bg-slate-800/60", "text-slate-500");
+      keyBtn.classList.add("bg-amber-500", "text-white");
+    } else if (cor === "cinza" && !isVerde && !isAmarelo) {
+      keyBtn.classList.remove("bg-slate-700", "text-white");
+      keyBtn.classList.add("bg-slate-800/60", "text-slate-500");
     }
   });
 }
@@ -419,6 +437,34 @@ function formatarTempo(ms) {
   return `${String(min).padStart(2, '0')}:${String(seg).padStart(2, '0')}.${String(msResto).padStart(2, '0')}`;
 }
 
+function obterSemanaAtual() {
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  data.setDate(data.getDate() - (data.getDay() === 0 ? 6 : data.getDay() - 1));
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+function normalizarLeaderboard(valor) {
+  const dados = Array.isArray(valor)
+    ? { semanaReset: obterSemanaAtual(), topTempos: valor, pontuacaoGeral: {} }
+    : valor && typeof valor === "object"
+      ? valor
+      : {};
+  const semanaAtual = obterSemanaAtual();
+  const mesmaSemana = !dados.semanaReset || dados.semanaReset === semanaAtual;
+
+  return {
+    semanaReset: semanaAtual,
+    topTempos: mesmaSemana && Array.isArray(dados.topTempos) ? dados.topTempos : [],
+    pontuacaoGeral: dados.pontuacaoGeral && typeof dados.pontuacaoGeral === "object"
+      ? Object.assign(Object.create(null), dados.pontuacaoGeral)
+      : Object.create(null)
+  };
+}
+
 export async function obterLeaderboard() {
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
@@ -426,58 +472,85 @@ export async function obterLeaderboard() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const ranking = Array.isArray(data.record) ? data.record : [];
-    localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(ranking));
-    return ranking;
+    const leaderboard = normalizarLeaderboard(data.record);
+    localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+    return leaderboard;
   } catch (err) {
     console.warn("Falha no JSONbin, buscando cache local:", err);
     try {
       const raw = localStorage.getItem(STORAGE_LEADERBOARD_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
+      const leaderboard = normalizarLeaderboard(raw ? JSON.parse(raw) : null);
+      localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+      return leaderboard;
+    } catch (err) {
+      console.warn("Falha ao ler o cache local do leaderboard:", err);
+      return normalizarLeaderboard(null);
     }
   }
 }
 
-export async function salvarNovoRecorde(nome, tempoMs, avatarId = "doge") {
-  const listaAtual = await obterLeaderboard();
-  
-  // CAPTURANDO O HISTÓRICO: Pega todas as palavras preenchidas na grade
+export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", registrarTempo = true) {
+  const leaderboard = await obterLeaderboard();
+  const nomeDisplay = nome.trim().toUpperCase() || "JOGADOR";
+  const idConta = pin.trim().toUpperCase() || "JOGADOR_GHOST";
+
   const historicoPalpites = EstadoJogo.tentativas
     .map(linha => linha.join(""))
     .filter(palavra => palavra.length === EstadoJogo.tamanhoPalavra);
 
-  listaAtual.push({ 
-    nome: nome.trim().toUpperCase() || "JOGADOR", 
-    tempoMs, 
-    avatar: avatarId, 
-    historico: historicoPalpites, // Enviando o histórico para a nuvem
-    data: new Date().toLocaleDateString() 
-  });
+  if (registrarTempo) {
+    leaderboard.topTempos.push({
+      nome: nomeDisplay,
+      tempoMs,
+      avatar: avatarId,
+      historico: historicoPalpites,
+      data: new Date().toLocaleDateString()
+    });
+    leaderboard.topTempos.sort((a, b) => a.tempoMs - b.tempoMs);
+    leaderboard.topTempos = leaderboard.topTempos.slice(0, 10);
+  }
 
-  listaAtual.sort((a, b) => a.tempoMs - b.tempoMs);
-  const top10 = listaAtual.slice(0, 10);
+  const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
+  const contaAtual = Object.prototype.hasOwnProperty.call(leaderboard.pontuacaoGeral, idConta)
+    ? leaderboard.pontuacaoGeral[idConta]
+    : {
+        nome: nomeDisplay,
+        pontos: 0,
+        avatar: avatarId
+      };
+  contaAtual.pontos += pontosGanhos;
+  contaAtual.nome = nomeDisplay;
+  contaAtual.avatar = avatarId;
+  leaderboard.pontuacaoGeral[idConta] = contaAtual;
 
-  localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(top10));
+  localStorage.setItem(STORAGE_USER_PIN_KEY, idConta);
+  localStorage.setItem(STORAGE_USER_NAME_KEY, nomeDisplay);
+  localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
 
+  let sincronizado = false;
   try {
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         "X-Access-Key": JSONBIN_ACCESS_KEY
       },
-      body: JSON.stringify(top10)
+      body: JSON.stringify(leaderboard)
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    sincronizado = true;
   } catch (err) {
     console.error("Erro ao sincronizar com JSONbin:", err);
   }
+
+  return { pontosGanhos, sincronizado };
 }
 
 // Abrir Modal de Avatares
 function abrirModalDeAvatares() {
-  avatarGridContainer.innerHTML = AVATARES.map((item) => `
+  avatarGridContainer.innerHTML = AVATARES
+    .filter((item) => !item.oculto) // <--- ESTA LINHA ESCONDE O GARY
+    .map((item) => `
     <div 
       data-id="${item.id}"
       class="avatar-card-item flex flex-col items-center justify-between p-3 rounded-xl border-2 ${item.id === avatarSelecionado ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-900/50 opacity-70'} hover:opacity-100 cursor-pointer transition-all duration-150"
@@ -528,29 +601,40 @@ async function abrirModal(vitoria) {
   if (vitoria) {
     const tempoStr = formatarTempo(tempoFinalMs);
     const leaderboard = await obterLeaderboard();
+    const leaderboardTempos = leaderboard.topTempos;
     
-    const piorTempoCadastrado = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].tempoMs : Infinity;
-    const ehNovoRecorde = leaderboard.length < 10 || tempoFinalMs < piorTempoCadastrado;
+    const piorTempoCadastrado = leaderboardTempos.length > 0
+      ? leaderboardTempos[leaderboardTempos.length - 1].tempoMs
+      : Infinity;
+    const ehNovoRecorde = leaderboardTempos.length < 10 || tempoFinalMs < piorTempoCadastrado;
+    const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
 
-    modalBadge.textContent = ehNovoRecorde ? "Novo Recorde!" : "Vitória";
-    modalBadge.className = ehNovoRecorde
-      ? "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20"
-      : "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+    if (EstadoJogo.linhaAtual === 0) {
+      modalBadge.textContent = "🏆 DE PRIMEIRA!";
+      modalBadge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-widest bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30 animate-pulse";
+      modalTitle.textContent = "GÊNIO DO TERMO!";
+    } else {
+      modalBadge.textContent = ehNovoRecorde ? "Novo Recorde!" : "Vitória";
+      modalBadge.className = ehNovoRecorde
+        ? "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20"
+        : "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+      modalTitle.textContent = "Palavra Adivinhada!";
+    }
 
-    modalTitle.textContent = "Palavra Adivinhada!";
     modalTitle.className = "text-xl font-bold text-white tracking-tight";
-    modalBody.textContent = `Resolvido em ${EstadoJogo.linhaAtual + 1} tentativa(s) • Tempo: ${tempoStr}`;
+    modalBody.textContent = `Resolvido em ${EstadoJogo.linhaAtual + 1} tentativa(s) • Tempo: ${tempoStr} (+${pontosGanhos} pts)`;
     modalBtnRestart.className = "w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-all duration-200 cursor-pointer";
 
     const lbSection = document.createElement("div");
     lbSection.id = "modal-leaderboard-section";
     lbSection.className = "w-full flex flex-col gap-2.5 bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 text-left";
 
-    if (ehNovoRecorde) {
-      avatarSelecionado = AVATARES[0].id;
+    avatarSelecionado = AVATARES[0].id;
+    const nomeSalvo = localStorage.getItem(STORAGE_USER_NAME_KEY) || "";
+    const pinSalvo = localStorage.getItem(STORAGE_USER_PIN_KEY) || "";
 
-      lbSection.innerHTML = `
-        <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">Qualifique-se no Top 10</span>
+    lbSection.innerHTML = `
+        <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${ehNovoRecorde ? "Entre no Top 10 da semana e registre seus pontos" : "Registre seus pontos no ranking geral"}</span>
         <div class="flex flex-col gap-2.5">
           <div class="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
             <div class="flex items-center gap-3">
@@ -567,7 +651,7 @@ async function abrirModal(vitoria) {
               <span>Alterar</span>
             </button>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-col gap-2">
             <input 
               type="text" 
               id="record-name-input" 
@@ -576,27 +660,33 @@ async function abrirModal(vitoria) {
               autocomplete="off" 
               autocorrect="off" 
               spellcheck="false" 
-              class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase" 
+              class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full min-w-0 focus:outline-none uppercase" 
             />
-            <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
+            <div class="flex gap-2">
+              <input
+                type="password"
+                id="record-pin-input"
+                maxlength="15"
+                placeholder="ID SECRETO (PIN)"
+                autocomplete="off"
+                class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase"
+              />
+              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
+            </div>
           </div>
         </div>
-      `;
-    } else {
-      let rankingHtml = leaderboard.slice(0, 5).map((item, idx) => `
-        <div class="flex justify-between items-center text-xs font-medium ${idx === 0 ? 'text-amber-400 font-bold' : 'text-slate-300'}">
-          <div class="flex items-center gap-2.5">
-            <img src="${obterSrcAvatar(item.avatar)}" class="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-slate-700" alt="avatar" />
-            <span>#${idx + 1} ${item.nome}</span>
-          </div>
-          <span class="font-mono">${formatarTempo(item.tempoMs)}</span>
-        </div>
-      `).join("");
-
-      lbSection.innerHTML = `
-        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center block">Top 5 Geral</span>
-        <div class="flex flex-col gap-2 mt-1">${rankingHtml}</div>
-      `;
+    `;
+    lbSection.querySelector("#record-name-input").value = nomeSalvo;
+    lbSection.querySelector("#record-pin-input").value = pinSalvo;
+    if (EstadoJogo.linhaAtual === 0) {
+      const btnPremio = document.createElement("button");
+      btnPremio.type = "button";
+      btnPremio.className = "w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black tracking-widest text-xs py-3 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center";
+      btnPremio.textContent = "🎁 RESGATAR PRÊMIO MÁXIMO";
+      btnPremio.addEventListener("click", () => {
+        window.open("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "_blank", "noopener,noreferrer");
+      });
+      lbSection.prepend(btnPremio);
     }
 
     modalSecretWord.parentElement.after(lbSection);
@@ -611,7 +701,8 @@ async function abrirModal(vitoria) {
       if (btnSave) {
         btnSave.addEventListener("click", async () => {
           const nameInput = document.getElementById("record-name-input");
-          if (nameInput && nameInput.value) {
+          const pinInput = document.getElementById("record-pin-input");
+          if (nameInput && nameInput.value.trim() && pinInput && pinInput.value.trim()) {
             
             // VERIFICAÇÃO TROLL: Se escolher o avatar armadilha, toma timeout de 30 minutos!
             const avatarObjeto = AVATARES.find(a => a.id === avatarSelecionado);
@@ -621,9 +712,32 @@ async function abrirModal(vitoria) {
             }
 
             btnSave.disabled = true;
-            btnSave.textContent = "Salvo ✓";
-            btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg shrink-0 min-w-[72px] text-center";
-            await salvarNovoRecorde(nameInput.value, tempoFinalMs, avatarSelecionado);
+            btnSave.textContent = "Salvando...";
+            try {
+              const resultado = await salvarNovoRecorde(
+                nameInput.value,
+                pinInput.value,
+                tempoFinalMs,
+                avatarSelecionado,
+                ehNovoRecorde
+              );
+              btnSave.textContent = resultado.sincronizado
+                ? `Salvo ✓ (+${resultado.pontosGanhos} pts)`
+                : `Local (+${resultado.pontosGanhos} pts)`;
+              btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg shrink-0 min-w-[72px] text-center";
+              if (!resultado.sincronizado) {
+                statusEl.textContent = "Pontuação salva neste dispositivo; não foi possível sincronizar com o ranking.";
+              }
+            } catch (err) {
+              console.error("Erro ao registrar a pontuação:", err);
+              btnSave.disabled = false;
+              btnSave.textContent = "Tentar de novo";
+            }
+          } else {
+            btnSave.textContent = "Preencha nome e PIN";
+            setTimeout(() => {
+              if (!btnSave.disabled) btnSave.textContent = "Salvar";
+            }, 1500);
           }
         });
       }

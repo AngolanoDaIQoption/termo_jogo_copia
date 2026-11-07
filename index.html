@@ -115,12 +115,16 @@
     </div>
   </div>
 
-  <!-- Modal do Ranking Top 10 -->
+  <!-- Modal dos rankings semanal e geral -->
   <div id="modal-ranking" class="fixed inset-0 bg-[#070a0f]/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
     <div class="glass-card border border-slate-800/90 rounded-2xl p-5 max-w-xs sm:max-w-sm w-full shadow-2xl flex flex-col gap-3">
       <div class="flex justify-between items-center border-b border-slate-800 pb-2.5">
-        <h3 class="text-sm font-bold text-white tracking-wider uppercase">🏆 Top 10 Menores Tempos</h3>
+        <h3 class="text-sm font-bold text-white tracking-wider uppercase">🏆 Rankings</h3>
         <button id="btn-close-ranking" class="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer">✕</button>
+      </div>
+      <div class="flex gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 mb-1">
+        <button id="tab-tempos" class="flex-1 bg-slate-800 text-amber-400 border border-slate-700 text-[10px] font-bold py-1.5 rounded transition cursor-pointer">⏳ TEMPOS (SEMANA)</button>
+        <button id="tab-pontos" class="flex-1 text-slate-500 hover:text-slate-300 text-[10px] font-bold py-1.5 rounded transition cursor-pointer">⭐ PONTUAÇÃO (GERAL)</button>
       </div>
       <div id="ranking-list-container" class="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar"></div>
     </div>
@@ -163,6 +167,10 @@
     const modalRanking = document.getElementById("modal-ranking");
     const btnCloseRanking = document.getElementById("btn-close-ranking");
     const listContainer = document.getElementById("ranking-list-container");
+    const tabTempos = document.getElementById("tab-tempos");
+    const tabPontos = document.getElementById("tab-pontos");
+    let dadosAtuais = null;
+    let abaAtiva = "tempos";
 
     function formatarTempo(ms) {
       const totalSeg = Math.floor(ms / 1000);
@@ -172,67 +180,119 @@
       return `${String(min).padStart(2, '0')}:${String(seg).padStart(2, '0')}.${String(msResto).padStart(2, '0')}`;
     }
 
+    function exibirMensagem(mensagem, classe = "text-slate-500") {
+      const span = document.createElement("span");
+      span.className = `text-xs ${classe} text-center py-4`;
+      span.textContent = mensagem;
+      listContainer.replaceChildren(span);
+    }
+
+    function criarJogador(item, indice, pontuacao = false) {
+      const row = document.createElement("div");
+      row.className = pontuacao
+        ? "flex justify-between items-center bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/80 text-xs"
+        : "flex flex-col bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 text-xs gap-1.5";
+
+      const playerWrapper = document.createElement("div");
+      playerWrapper.className = "flex items-center gap-2.5";
+
+      const img = document.createElement("img");
+      img.src = obterSrcAvatar(item.avatar);
+      img.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-slate-700";
+      img.alt = "Avatar";
+
+      const player = document.createElement("span");
+      player.className = "font-medium text-slate-200";
+      player.textContent = `#${indice + 1} ${item.nome || "JOGADOR"}`;
+      playerWrapper.append(img, player);
+
+      const scoreOrTime = document.createElement("span");
+      scoreOrTime.className = pontuacao
+        ? "font-black text-fuchsia-400 tracking-wide"
+        : "font-mono text-amber-400 font-semibold";
+      scoreOrTime.textContent = pontuacao
+        ? `${Number(item.pontos) || 0} PTS`
+        : formatarTempo(item.tempoMs);
+
+      if (pontuacao) {
+        row.append(playerWrapper, scoreOrTime);
+        return row;
+      }
+
+      const topRow = document.createElement("div");
+      topRow.className = "flex justify-between items-center";
+      topRow.append(playerWrapper, scoreOrTime);
+      row.appendChild(topRow);
+
+      const histRow = document.createElement("div");
+      histRow.className = "bg-slate-950/50 px-2 py-1 rounded text-[10px] font-mono text-slate-400 flex items-center justify-between";
+      const label = document.createElement("span");
+      label.className = "text-slate-500 font-sans";
+      label.textContent = "Jogada:";
+      const history = document.createElement("span");
+      history.className = "text-emerald-400/90 font-bold tracking-wide";
+      history.textContent = Array.isArray(item.historico) && item.historico.length
+        ? item.historico.join(" ➔ ")
+        : "Sem histórico";
+      histRow.append(label, history);
+      row.appendChild(histRow);
+      return row;
+    }
+
+    function renderizarLista() {
+      listContainer.replaceChildren();
+      if (!dadosAtuais) return;
+
+      if (abaAtiva === "tempos") {
+        const lista = Array.isArray(dadosAtuais.topTempos) ? dadosAtuais.topTempos : [];
+        if (lista.length === 0) {
+          exibirMensagem("Nenhum recorde nesta semana.");
+          return;
+        }
+        lista.forEach((item, indice) => listContainer.appendChild(criarJogador(item, indice)));
+        return;
+      }
+
+      const pontos = dadosAtuais.pontuacaoGeral || {};
+      const lista = Object.values(pontos)
+        .map((item) => ({
+          nome: item.nome || "JOGADOR",
+          pontos: Number(item.pontos) || 0,
+          avatar: item.avatar
+        }))
+        .sort((a, b) => b.pontos - a.pontos);
+      if (lista.length === 0) {
+        exibirMensagem("Nenhum ponto registrado ainda.");
+        return;
+      }
+      lista.forEach((item, indice) => listContainer.appendChild(criarJogador(item, indice, true)));
+    }
+
+    function trocarAba(novaAba) {
+      abaAtiva = novaAba;
+      tabTempos.className = novaAba === "tempos"
+        ? "flex-1 bg-slate-800 text-amber-400 border border-slate-700 text-[10px] font-bold py-1.5 rounded transition cursor-pointer"
+        : "flex-1 text-slate-500 hover:text-slate-300 text-[10px] font-bold py-1.5 rounded transition cursor-pointer";
+      tabPontos.className = novaAba === "pontos"
+        ? "flex-1 bg-slate-800 text-fuchsia-400 border border-slate-700 text-[10px] font-bold py-1.5 rounded transition cursor-pointer"
+        : "flex-1 text-slate-500 hover:text-slate-300 text-[10px] font-bold py-1.5 rounded transition cursor-pointer";
+      renderizarLista();
+    }
+
+    tabTempos.addEventListener("click", () => trocarAba("tempos"));
+    tabPontos.addEventListener("click", () => trocarAba("pontos"));
+
     btnLb.addEventListener("click", async () => {
-      listContainer.innerHTML = `<span class="text-xs text-slate-400 text-center py-4">Carregando ranking...</span>`;
+      exibirMensagem("Carregando rankings...", "text-slate-400");
       modalRanking.classList.remove("hidden");
       modalRanking.classList.add("flex");
 
       try {
-        const dados = await obterLeaderboard();
-        const lista = Array.isArray(dados)
-          ? dados
-          : dados && Array.isArray(dados.record)
-            ? dados.record
-            : [];
-
-        if (lista.length === 0) {
-          listContainer.innerHTML = `<span class="text-xs text-slate-500 text-center py-4">Nenhum recorde registrado ainda.</span>`;
-          return;
-        }
-
-        listContainer.replaceChildren();
-        lista.forEach((item, idx) => {
-          const row = document.createElement("div");
-          row.className = "flex flex-col bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 text-xs gap-1.5";
-
-          const topRow = document.createElement("div");
-          topRow.className = "flex justify-between items-center";
-
-          const playerWrapper = document.createElement("div");
-          playerWrapper.className = "flex items-center gap-2.5";
-
-          const img = document.createElement("img");
-          img.src = obterSrcAvatar(item.avatar);
-          img.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-slate-700";
-          img.alt = "avatar";
-
-          const player = document.createElement("span");
-          player.className = "font-medium text-slate-200";
-          player.textContent = `#${idx + 1} ${item.nome || "JOGADOR"}`;
-
-          playerWrapper.append(img, player);
-
-          const time = document.createElement("span");
-          time.className = "font-mono text-amber-400 font-semibold";
-          time.textContent = formatarTempo(item.tempoMs);
-
-          topRow.append(playerWrapper, time);
-          row.appendChild(topRow);
-
-          // Renderização do Histórico
-          const temHistorico = Array.isArray(item.historico) && item.historico.length > 0;
-          const palpitesStr = temHistorico ? item.historico.join(" ➔ ") : "Sem histórico";
-
-          const histRow = document.createElement("div");
-          histRow.className = "bg-slate-950/50 px-2 py-1 rounded text-[10px] font-mono text-slate-400 flex items-center justify-between";
-          histRow.innerHTML = `<span class="text-slate-500 font-sans">Jogada:</span> <span class="text-emerald-400/90 font-bold tracking-wide">${palpitesStr}</span>`;
-
-          row.appendChild(histRow);
-          listContainer.appendChild(row);
-        });
+        dadosAtuais = await obterLeaderboard();
+        renderizarLista();
       } catch (err) {
         console.error("Erro ao montar modal de ranking:", err);
-        listContainer.innerHTML = `<span class="text-xs text-rose-400 text-center py-4">Erro ao carregar ranking.</span>`;
+        exibirMensagem("Erro ao carregar rankings.", "text-rose-400");
       }
     });
 

@@ -16,6 +16,7 @@ export const AVATARES = [
   { id: "angolano", nome: "AngolanoIQOption", src: "./assets/avatars/angolano.png" },
   { id: "petista", nome: "Petista médio", src: "./assets/avatars/petista.png"},
   { id: "pix", nome: "Pix da Silva JR", src: "./assets/avatars/pix.png"},
+  { id: "gary", nome: "Gary (Default)", src: "./assets/avatars/gary.webp", oculto: true }
 ];
 
 export const AVATAR_PADRAO = AVATARES[0];
