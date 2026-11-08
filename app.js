@@ -34,6 +34,7 @@ const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
 const STORAGE_USER_PIN_KEY = "termo_user_pin";
 const STORAGE_USER_NAME_KEY = "termo_user_name";
 const STORAGE_USER_AVATAR_KEY = "termo_user_avatar";
+const STORAGE_PENDING_SCORE_EVENTS_KEY = "termo_pending_score_events_v1";
 const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
 
 // Configuração da API (Cloudflare Workers + D1)
@@ -489,6 +490,102 @@ export async function obterLeaderboard() {
   }
 }
 
+function lerEventosPontuacaoPendentes() {
+  const raw = localStorage.getItem(STORAGE_PENDING_SCORE_EVENTS_KEY);
+  if (!raw) return [];
+
+  const eventos = JSON.parse(raw);
+  if (!Array.isArray(eventos)) {
+    throw new Error("A fila de sincronização de pontos está inválida.");
+  }
+  return eventos;
+}
+
+function aplicarEventoAoLeaderboard(leaderboard, evento) {
+  if (evento.registrarTempo) {
+    leaderboard.topTempos.push({
+      nome: evento.nome,
+      tempoMs: evento.tempoMs,
+      avatar: evento.avatar,
+      historico: evento.historico,
+      data: evento.data
+    });
+    leaderboard.topTempos.sort((a, b) => a.tempoMs - b.tempoMs);
+    leaderboard.topTempos = leaderboard.topTempos.slice(0, 10);
+  }
+
+  const contaAtual = Object.prototype.hasOwnProperty.call(leaderboard.pontuacaoGeral, evento.pin)
+    ? leaderboard.pontuacaoGeral[evento.pin]
+    : { nome: evento.nome, pontos: 0, avatar: evento.avatar };
+  contaAtual.pontos += evento.pontosGanhos;
+  contaAtual.nome = evento.nome;
+  contaAtual.avatar = evento.avatar;
+  leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
+}
+
+function gerarIdEvento() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function sincronizarPontuacoesPendentes() {
+  let eventosPendentes;
+  try {
+    eventosPendentes = lerEventosPontuacaoPendentes();
+  } catch (err) {
+    console.error("Erro ao ler a fila de sincronização de pontos:", err);
+    return { sincronizado: false, erro: err.message };
+  }
+
+  while (eventosPendentes.length > 0) {
+    const evento = eventosPendentes[0];
+    try {
+      const res = await fetch(`${API_URL}/salvar`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Master-Key": API_KEY
+        },
+        body: JSON.stringify(evento)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const resultado = await res.json();
+      if (resultado.sucesso !== true || !Number.isFinite(resultado.pontos)) {
+        throw new Error("A API retornou uma confirmação inválida.");
+      }
+
+      eventosPendentes.shift();
+      localStorage.setItem(STORAGE_PENDING_SCORE_EVENTS_KEY, JSON.stringify(eventosPendentes));
+
+      try {
+        const leaderboard = normalizarLeaderboard(
+          JSON.parse(localStorage.getItem(STORAGE_LEADERBOARD_KEY) || "null")
+        );
+        const contaAtual = leaderboard.pontuacaoGeral[evento.pin] || {
+          nome: evento.nome,
+          pontos: 0,
+          avatar: evento.avatar
+        };
+        contaAtual.nome = evento.nome;
+        contaAtual.pontos = resultado.pontos;
+        contaAtual.avatar = evento.avatar;
+        leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
+        localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+      } catch (err) {
+        console.error("A API confirmou os pontos, mas não foi possível atualizar o cache local:", err);
+      }
+    } catch (err) {
+      console.error("Erro ao sincronizar pontuação pendente:", err);
+      return { sincronizado: false, erro: err.message };
+    }
+  }
+
+  return { sincronizado: true };
+}
+
 export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", registrarTempo = true) {
   const leaderboard = await obterLeaderboard();
   const nomeDisplay = nome.trim().toUpperCase() || "JOGADOR";
@@ -498,62 +595,31 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
     .map(linha => linha.join(""))
     .filter(palavra => palavra.length === EstadoJogo.tamanhoPalavra);
 
-  if (registrarTempo) {
-    leaderboard.topTempos.push({
-      nome: nomeDisplay,
-      tempoMs,
-      avatar: avatarId,
-      historico: historicoPalpites,
-      data: new Date().toLocaleDateString()
-    });
-    leaderboard.topTempos.sort((a, b) => a.tempoMs - b.tempoMs);
-    leaderboard.topTempos = leaderboard.topTempos.slice(0, 10);
-  }
-
   const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
-  const contaAtual = Object.prototype.hasOwnProperty.call(leaderboard.pontuacaoGeral, idConta)
-    ? leaderboard.pontuacaoGeral[idConta]
-    : {
-        nome: nomeDisplay,
-        pontos: 0,
-        avatar: avatarId
-      };
-  contaAtual.pontos += pontosGanhos;
-  contaAtual.nome = nomeDisplay;
-  contaAtual.avatar = avatarId;
-  leaderboard.pontuacaoGeral[idConta] = contaAtual;
+  const eventosPendentes = lerEventosPontuacaoPendentes();
+  const evento = {
+    eventId: gerarIdEvento(),
+    nome: nomeDisplay,
+    pin: idConta,
+    tempoMs,
+    avatar: avatarId,
+    registrarTempo,
+    pontosGanhos,
+    historico: historicoPalpites,
+    data: new Date().toLocaleDateString("pt-BR")
+  };
+  eventosPendentes.push(evento);
+  localStorage.setItem(STORAGE_PENDING_SCORE_EVENTS_KEY, JSON.stringify(eventosPendentes));
+
+  aplicarEventoAoLeaderboard(leaderboard, evento);
 
   localStorage.setItem(STORAGE_USER_PIN_KEY, idConta);
   localStorage.setItem(STORAGE_USER_NAME_KEY, nomeDisplay);
   localStorage.setItem(STORAGE_USER_AVATAR_KEY, avatarId);
   localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
 
-  let sincronizado = false;
-  try {
-    const res = await fetch(`${API_URL}/salvar`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Master-Key": API_KEY
-      },
-      body: JSON.stringify({
-        nome: nomeDisplay,
-        pin: idConta,
-        tempoMs,
-        avatar: avatarId,
-        registrarTempo,
-        pontosGanhos,
-        historico: historicoPalpites,
-        data: new Date().toLocaleDateString("pt-BR")
-      })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    sincronizado = true;
-  } catch (err) {
-    console.error("Erro ao sincronizar com a API:", err);
-  }
-
-  return { pontosGanhos, sincronizado };
+  const resultado = await sincronizarPontuacoesPendentes();
+  return { pontosGanhos, sincronizado: resultado.sincronizado, erro: resultado.erro };
 }
 
 // Abrir Modal de Avatares
@@ -594,6 +660,7 @@ function fecharModalDeAvatares() {
 
 btnCloseAvatarModal.addEventListener("click", fecharModalDeAvatares);
 btnConfirmAvatar.addEventListener("click", () => {
+  localStorage.setItem(STORAGE_USER_AVATAR_KEY, avatarSelecionado);
   const currentAvatarPreview = document.getElementById("current-avatar-preview");
   if (currentAvatarPreview) {
     currentAvatarPreview.src = obterSrcAvatar(avatarSelecionado);
@@ -642,44 +709,58 @@ async function abrirModal(vitoria) {
     const nomeSalvo = localStorage.getItem(STORAGE_USER_NAME_KEY) || "";
     const pinSalvo = localStorage.getItem(STORAGE_USER_PIN_KEY) || "";
     const avatarSalvo = localStorage.getItem(STORAGE_USER_AVATAR_KEY);
+    const temPerfilSalvo = Boolean(nomeSalvo.trim() && pinSalvo.trim());
     avatarSelecionado = avatarSalvo || AVATARES[0].id;
 
-    lbSection.innerHTML = `
-        <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${ehNovoRecorde ? "Entre no Top 10 da semana e registre seus pontos" : "Registre seus pontos no ranking geral"}</span>
-        <div class="flex flex-col gap-2.5">
-          <div class="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
-            <div class="flex items-center gap-3">
-              <img id="current-avatar-preview" src="${obterSrcAvatar(avatarSelecionado)}" class="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow" alt="Avatar" />
-              <div class="flex flex-col">
-                <span class="text-xs font-semibold text-slate-200">Avatar</span>
-                <span class="text-[10px] text-slate-400">Escolha a sua imagem</span>
-              </div>
-            </div>
-            <button id="btn-open-avatar-picker" type="button" class="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/80 transition cursor-pointer">
-              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-              </svg>
-              <span>Alterar</span>
-            </button>
+    const avatarEditorHtml = `
+      <div class="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+        <div class="flex items-center gap-3">
+          <img id="current-avatar-preview" src="${obterSrcAvatar(avatarSelecionado)}" class="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow" alt="Avatar" />
+          <div class="flex flex-col">
+            <span class="text-xs font-semibold text-slate-200">Avatar</span>
+            <span class="text-[10px] text-slate-400">Escolha a sua imagem</span>
           </div>
-          <div class="flex flex-col gap-2 mt-1">
-            <input type="text" id="record-name-input" maxlength="15" value="${nomeSalvo}" placeholder="NOME VISÍVEL NO RANKING (EX: GIGACHAD67)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
-            
-            <div class="flex flex-col gap-1.5">
-              <div class="flex items-center gap-2">
-                <input type="password" id="record-pin-input" maxlength="15" value="${pinSalvo}" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
-                <button id="btn-save-record" type="button" class="bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-slate-950 font-semibold text-xs px-3 rounded-lg transition-colors cursor-pointer shrink-0 min-w-[72px] h-[34px] focus:outline-none focus:ring-2 focus:ring-amber-300/50">Salvar</button>
-              </div>
-              <span class="flex items-start gap-1.5 text-[9px] text-rose-300/90 font-medium leading-tight px-1 tracking-wide">
-                <svg class="w-3 h-3 shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 4h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0Z"></path>
-                </svg>
-                <span>Não use senhas reais. O ID não pode ser igual ao nome.</span>
-              </span>
-            </div>
+        </div>
+        <button id="btn-open-avatar-picker" type="button" class="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/80 transition cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+          </svg>
+          <span>Alterar</span>
+        </button>
+      </div>
+    `;
+    const cadastroHtml = temPerfilSalvo ? "" : `
+      <div class="flex flex-col gap-2 mt-1">
+        <input type="text" id="record-name-input" maxlength="15" placeholder="NOME VISÍVEL NO RANKING (EX: GIGACHAD67)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center gap-2">
+            <input type="password" id="record-pin-input" maxlength="15" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
+            <button id="btn-save-record" type="button" class="bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-slate-950 font-semibold text-xs px-3 rounded-lg transition-colors cursor-pointer shrink-0 min-w-[72px] h-[34px] focus:outline-none focus:ring-2 focus:ring-amber-300/50">Salvar</button>
+          </div>
+          <span class="flex items-start gap-1.5 text-[9px] text-rose-300/90 font-medium leading-tight px-1 tracking-wide">
+            <svg class="w-3 h-3 shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 4h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0Z"></path>
+            </svg>
+            <span>Não use senhas reais. O ID não pode ser igual ao nome.</span>
+          </span>
+        </div>
+      </div>
+    `;
+    lbSection.innerHTML = `
+        <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${temPerfilSalvo ? "Seus pontos são salvos automaticamente" : "Informe seus dados para registrar os pontos"}</span>
+        <div class="flex flex-col gap-2.5">
+          ${avatarEditorHtml}
+          ${cadastroHtml}
+          <div class="flex flex-col gap-1.5">
+            <span id="record-save-status" class="text-[10px] text-slate-400 text-center">${temPerfilSalvo ? "Salvando pontos..." : ""}</span>
+            <button id="btn-retry-record-sync" type="button" hidden class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">Tentar sincronizar novamente</button>
           </div>
         </div>
     `;
+    if (!temPerfilSalvo) {
+      document.getElementById("record-name-input").value = nomeSalvo;
+      document.getElementById("record-pin-input").value = pinSalvo;
+    }
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
       btnPremio.type = "button";
@@ -698,10 +779,30 @@ async function abrirModal(vitoria) {
 
     modalSecretWord.parentElement.after(lbSection);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const btnOpenPicker = document.getElementById("btn-open-avatar-picker");
       if (btnOpenPicker) {
         btnOpenPicker.addEventListener("click", abrirModalDeAvatares);
+      }
+
+      const saveStatus = document.getElementById("record-save-status");
+      const retryButton = document.getElementById("btn-retry-record-sync");
+      const tentarSincronizar = async () => {
+        if (!saveStatus || !retryButton) return;
+        retryButton.disabled = true;
+        retryButton.textContent = "Sincronizando...";
+        const resultado = await sincronizarPontuacoesPendentes();
+        if (resultado.sincronizado) {
+          saveStatus.textContent = "Pontos sincronizados com o ranking.";
+          retryButton.hidden = true;
+        } else {
+          saveStatus.textContent = "Não foi possível sincronizar. Os pontos continuam salvos neste navegador.";
+          retryButton.textContent = "Tentar sincronizar novamente";
+        }
+        retryButton.disabled = false;
+      };
+      if (retryButton) {
+        retryButton.addEventListener("click", tentarSincronizar);
       }
 
       const btnSave = document.getElementById("btn-save-record");
@@ -737,14 +838,25 @@ async function abrirModal(vitoria) {
               btnSave.textContent = resultado.sincronizado
                 ? `Salvo (+${resultado.pontosGanhos} pts)`
                 : `Local (+${resultado.pontosGanhos} pts)`;
-              btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center";
-              if (!resultado.sincronizado) {
-                statusEl.textContent = "Pontuação salva neste dispositivo; não foi possível sincronizar com o ranking.";
+              btnSave.className = resultado.sincronizado
+                ? "bg-emerald-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center"
+                : "bg-amber-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center";
+              if (saveStatus) {
+                saveStatus.textContent = resultado.sincronizado
+                  ? "Pontos sincronizados com o ranking."
+                  : "Pontos salvos neste navegador; não foi possível sincronizar.";
+              }
+              if (retryButton) {
+                retryButton.hidden = resultado.sincronizado;
               }
             } catch (err) {
               console.error("Erro ao registrar a pontuação:", err);
               btnSave.disabled = false;
               btnSave.textContent = "Tentar de novo";
+              if (saveStatus) {
+                saveStatus.textContent = "Não foi possível salvar os pontos. Tente novamente.";
+              }
+              if (retryButton) retryButton.hidden = false;
             }
           } else {
             btnSave.textContent = "Preencha nome e PIN";
@@ -753,6 +865,26 @@ async function abrirModal(vitoria) {
             }, 1500);
           }
         });
+      }
+
+      if (temPerfilSalvo && saveStatus) {
+        try {
+          const resultado = await salvarNovoRecorde(
+            nomeSalvo,
+            pinSalvo,
+            tempoFinalMs,
+            avatarSelecionado,
+            ehNovoRecorde
+          );
+          saveStatus.textContent = resultado.sincronizado
+            ? "Pontos sincronizados com o ranking."
+            : "Pontos salvos neste navegador; não foi possível sincronizar.";
+          if (retryButton) retryButton.hidden = resultado.sincronizado;
+        } catch (err) {
+          console.error("Erro ao salvar automaticamente os pontos:", err);
+          saveStatus.textContent = "Não foi possível salvar os pontos. Tente novamente.";
+          if (retryButton) retryButton.hidden = false;
+        }
       }
     }, 50);
 
