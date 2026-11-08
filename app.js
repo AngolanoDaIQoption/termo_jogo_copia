@@ -34,6 +34,7 @@ const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
 const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
 const STORAGE_USER_PIN_KEY = "termo_user_pin";
 const STORAGE_USER_NAME_KEY = "termo_user_name";
+const STORAGE_USER_AVATAR_KEY = "termo_user_avatar";
 const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
 
 // Configuração do JSONbin
@@ -525,6 +526,7 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
 
   localStorage.setItem(STORAGE_USER_PIN_KEY, idConta);
   localStorage.setItem(STORAGE_USER_NAME_KEY, nomeDisplay);
+  localStorage.setItem(STORAGE_USER_AVATAR_KEY, avatarId);
   localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
 
   let sincronizado = false;
@@ -629,9 +631,10 @@ async function abrirModal(vitoria) {
     lbSection.id = "modal-leaderboard-section";
     lbSection.className = "w-full flex flex-col gap-2.5 bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 text-left";
 
-    avatarSelecionado = AVATARES[0].id;
     const nomeSalvo = localStorage.getItem(STORAGE_USER_NAME_KEY) || "";
     const pinSalvo = localStorage.getItem(STORAGE_USER_PIN_KEY) || "";
+    const avatarSalvo = localStorage.getItem(STORAGE_USER_AVATAR_KEY);
+    avatarSelecionado = avatarSalvo || AVATARES[0].id;
 
     lbSection.innerHTML = `
         <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${ehNovoRecorde ? "Entre no Top 10 da semana e registre seus pontos" : "Registre seus pontos no ranking geral"}</span>
