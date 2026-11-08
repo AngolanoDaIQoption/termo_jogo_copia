@@ -1,4 +1,4 @@
-import { EstadoJogo, TEMAS } from "./state.js";
+import { EstadoJogo } from "./state.js";
 import { obterPalavraAleatoria, palavraExiste } from "./api.js";
 import { AVATARES, obterSrcAvatar } from "./avatars.js";
 
@@ -7,7 +7,6 @@ const keyboardEl = document.getElementById("keyboard");
 const statusEl = document.getElementById("status-message");
 const btnRestart = document.getElementById("btn-restart");
 const themeSelect = document.getElementById("theme-select");
-const bodyEl = document.getElementById("app-body");
 
 // Elementos dos Modais
 const modalEndgame = document.getElementById("modal-endgame");
@@ -28,7 +27,7 @@ const btnConfirmAvatar = document.getElementById("btn-confirm-avatar");
 const modalTimeout = document.getElementById("modal-timeout");
 const timeoutCountdown = document.getElementById("timeout-countdown");
 
-const CLASSES_FOCO = ['ring-2', 'ring-[#1447e6]', 'border-[#1447e6]'];
+const CLASSES_FOCO = ["ring-2", "ring-tema-borda-ativa"];
 const STORAGE_PARTIDA_KEY = "termo_partida_atual_v1";
 const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
 const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
@@ -185,12 +184,14 @@ function renderizarGrade() {
       tile.textContent = letra;
 
       if (r < EstadoJogo.linhaAtual) {
-        tile.className = `${tileSize} flex items-center justify-center font-extrabold text-white rounded uppercase select-none transition-all duration-300`;
+        tile.className = `${tileSize} flex items-center justify-center font-extrabold text-[var(--text-principal)] rounded uppercase select-none transition-all duration-300 neon-border`;
       } else if (r === EstadoJogo.linhaAtual) {
-        const estiloBorda = letra ? "border-slate-500 bg-slate-800 text-white" : "border-slate-700 bg-slate-900/40 text-white";
-        tile.className = `${tileSize} border-2 ${estiloBorda} flex items-center justify-center font-extrabold rounded uppercase transition-all duration-150 cursor-pointer select-none`;
+        const estiloNeutro = letra
+          ? "border-tema-borda-ativa bg-tema-caixa-ativa"
+          : "border-tema-borda bg-tema-caixa";
+        tile.className = `${tileSize} border-2 ${estiloNeutro} text-[var(--text-principal)] flex items-center justify-center font-extrabold rounded uppercase transition-all duration-150 cursor-pointer select-none neon-border`;
       } else {
-        tile.className = `${tileSize} bg-slate-900/30 border border-slate-800/50 flex items-center justify-center font-extrabold text-slate-700 rounded uppercase select-none pointer-events-none opacity-40`;
+        tile.className = `${tileSize} tile-inactive bg-tema-caixa border border-tema-borda flex items-center justify-center font-extrabold text-tema-tecla-texto rounded uppercase select-none pointer-events-none opacity-40 neon-border`;
       }
 
       tile.addEventListener("click", () => {
@@ -241,7 +242,7 @@ function renderizarTeclado() {
         key === "ENTER" || key === "BACKSPACE"
           ? "px-3 text-xs flex-1 font-bold"
           : "w-9 text-sm font-semibold";
-      btn.className = `${width} h-12 bg-slate-700 text-white rounded hover:bg-slate-600 transition flex items-center justify-center cursor-pointer`;
+      btn.className = `${width} h-12 bg-tema-tecla text-tema-tecla-texto rounded hover:bg-tema-caixa-ativa transition flex items-center justify-center cursor-pointer neon-border`;
 
       btn.addEventListener("click", () => tratarEntrada(key));
       rowEl.appendChild(btn);
@@ -317,15 +318,11 @@ function atualizarTile(r, c, letra) {
   if (tile && r === EstadoJogo.linhaAtual) {
     tile.textContent = letra;
     if (letra) {
-      tile.className = tile.className
-        .replace(/border-slate-\d+/, "border-slate-400")
-        .replace(/bg-slate-\S+/, "bg-slate-800");
-      tile.classList.add("text-white");
+      tile.classList.remove("border-tema-borda", "bg-tema-caixa");
+      tile.classList.add("border-tema-borda-ativa", "bg-tema-caixa-ativa");
     } else {
-      tile.className = tile.className
-        .replace(/border-slate-\d+/, "border-slate-700")
-        .replace(/bg-slate-\S+/, "bg-slate-900/40");
-      tile.classList.add("text-white");
+      tile.classList.remove("border-tema-borda-ativa", "bg-tema-caixa-ativa");
+      tile.classList.add("border-tema-borda", "bg-tema-caixa");
     }
   }
 }
@@ -366,11 +363,11 @@ function aplicarCoresNaLinha(r) {
 
     if (tile) {
       if (cor === "verde") {
-        tile.className = `${tileSize} bg-emerald-600 text-white flex items-center justify-center font-bold rounded uppercase`;
+        tile.className = `${tileSize} bg-emerald-600 text-white flex items-center justify-center font-bold rounded uppercase neon-border`;
       } else if (cor === "amarelo") {
-        tile.className = `${tileSize} bg-amber-500 text-white flex items-center justify-center font-bold rounded uppercase`;
+        tile.className = `${tileSize} bg-amber-500 text-white flex items-center justify-center font-bold rounded uppercase neon-border`;
       } else {
-        tile.className = `${tileSize} bg-slate-800 text-slate-400 flex items-center justify-center font-bold rounded uppercase`;
+        tile.className = `${tileSize} bg-tema-caixa text-[var(--text-principal)] opacity-50 flex items-center justify-center font-bold rounded uppercase neon-border`;
       }
     }
 
@@ -378,22 +375,21 @@ function aplicarCoresNaLinha(r) {
 
     const isVerde = keyBtn.classList.contains("bg-emerald-600");
     const isAmarelo = keyBtn.classList.contains("bg-amber-500");
-    keyBtn.classList.remove("hover:bg-slate-600");
+    keyBtn.classList.remove("hover:bg-tema-caixa-ativa");
 
     if (cor === "verde" && !isVerde) {
       keyBtn.classList.remove(
-        "bg-slate-700",
+        "bg-tema-tecla",
         "bg-amber-500",
-        "bg-slate-800/60",
-        "text-slate-500"
+        "text-tema-tecla-texto",
+        "opacity-50"
       );
       keyBtn.classList.add("bg-emerald-600", "text-white");
     } else if (cor === "amarelo" && !isVerde && !isAmarelo) {
-      keyBtn.classList.remove("bg-slate-700", "bg-slate-800/60", "text-slate-500");
+      keyBtn.classList.remove("bg-tema-tecla", "text-tema-tecla-texto", "opacity-50");
       keyBtn.classList.add("bg-amber-500", "text-white");
     } else if (cor === "cinza" && !isVerde && !isAmarelo) {
-      keyBtn.classList.remove("bg-slate-700", "text-white");
-      keyBtn.classList.add("bg-slate-800/60", "text-slate-500");
+      keyBtn.classList.add("opacity-50");
     }
   });
 }
@@ -804,10 +800,7 @@ btnRestart.addEventListener("click", () => inicializarJogo(true));
 modalBtnRestart.addEventListener("click", () => inicializarJogo(true));
 
 themeSelect.addEventListener("change", (e) => {
-  const tema = TEMAS[e.target.value];
-  if (tema) {
-    bodyEl.className = `${tema.body} min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300 select-none relative`;
-  }
+  document.body.setAttribute("data-theme", e.target.value);
 });
 
 inicializarJogo(false);
