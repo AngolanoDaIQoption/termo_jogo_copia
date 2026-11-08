@@ -25,6 +25,22 @@ function getSemanaAtual() {
   return `${ano}-${mes}-${dia}`;
 }
 
+async function sincronizarSemana(db) {
+  const semanaAtual = getSemanaAtual();
+  const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
+  const semanaReset = configReq ? configReq.value : "";
+
+  if (semanaReset && semanaReset !== semanaAtual) {
+    await db.prepare("DELETE FROM partidas").run();
+  }
+
+  if (semanaReset !== semanaAtual) {
+    await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
+  }
+
+  return semanaAtual;
+}
+
 export default {
   async fetch(request, env) {
     const corsHeaders = getCorsHeaders(request);
@@ -52,21 +68,7 @@ export default {
     // 3. Rota: LER RANKING (GET /)
     if (method === "GET" && (url.pathname === "/" || url.pathname === "/ranking")) {
       try {
-        const semanaAtual = getSemanaAtual();
-
-        // Busca a data do último reset
-        const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
-        let semanaReset = configReq ? configReq.value : "";
-
-        // Se mudou de semana, reseta os tempos da semana anterior
-        if (semanaReset && semanaReset !== semanaAtual) {
-          await db.prepare("DELETE FROM partidas").run();
-          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
-          semanaReset = semanaAtual;
-        } else if (!semanaReset) {
-          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
-          semanaReset = semanaAtual;
-        }
+        const semanaReset = await sincronizarSemana(db);
 
         // Busca o Top 10 Tempos da semana
         const { results: topTempos } = await db.prepare(
@@ -100,7 +102,78 @@ export default {
       }
     }
 
-    // 4. Rota DEFINITIVA: SALVAR NOVO RECORDE / PONTUAÇÃO (POST /salvar ou POST /)
+    // 4. Rota: SALVAR TEMPO NO RANKING SEMANAL, sem alterar a pontuação geral
+    if (method === "POST" && url.pathname === "/tempo") {
+      try {
+        const body = await request.json();
+        const idPublico = typeof body.id === "string" ? body.id.trim().toUpperCase() : "";
+        const tempoMs = Number(body.tempoMs) || 0;
+        const historico = Array.isArray(body.historico) ? body.historico : [];
+
+        if (!/^[A-Z0-9_-]{1,15}$/.test(idPublico) || tempoMs <= 0 || historico.length > 6) {
+          return new Response(JSON.stringify({ erro: "ID público ou dados de tempo inválidos." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        await sincronizarSemana(db);
+
+        const avatar = body.avatar || "doge";
+        const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
+        await db.prepare(`
+          INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, historico_json, data_formatada)
+          VALUES (NULL, ?, ?, ?, ?, ?)
+        `).bind(idPublico, tempoMs, avatar, JSON.stringify(historico), dataStr).run();
+
+        return new Response(JSON.stringify({ sucesso: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // 5. Rota: ATUALIZAR AVATAR DO PERFIL sem alterar os pontos acumulados
+    if (method === "POST" && url.pathname === "/perfil/avatar") {
+      try {
+        const body = await request.json();
+        const pin = typeof body.pin === "string" ? body.pin.trim().toUpperCase() : "";
+        const avatar = typeof body.avatar === "string" ? body.avatar.trim() : "";
+
+        if (!/^[A-Z0-9_-]{1,15}$/.test(pin) || !/^[a-zA-Z0-9_-]{1,50}$/.test(avatar)) {
+          return new Response(JSON.stringify({ erro: "PIN ou avatar inválido." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const resultado = await db.prepare(
+          "UPDATE jogadores SET avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE pin = ?"
+        ).bind(avatar, pin).run();
+
+        if (resultado.meta.changes === 0) {
+          return new Response(JSON.stringify({ erro: "Perfil não encontrado no ranking geral." }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        return new Response(JSON.stringify({ sucesso: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // 6. Rota DEFINITIVA: SALVAR NOVO RECORDE / PONTUAÇÃO (POST /salvar ou POST /)
     if (method === "POST" && (url.pathname === "/salvar" || url.pathname === "/recorde" || url.pathname === "/")) {
       try {
         const body = await request.json();
@@ -151,13 +224,7 @@ export default {
         }
 
         // 2. Garante que a semana está sincronizada
-        const semanaAtual = getSemanaAtual();
-        const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
-        const semanaReset = configReq ? configReq.value : "";
-        if (semanaReset && semanaReset !== semanaAtual) {
-          await db.prepare("DELETE FROM partidas").run();
-          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
-        }
+        await sincronizarSemana(db);
 
         const avatar = body.avatar || "doge";
 
