@@ -1,0 +1,232 @@
+function getCorsHeaders(request) {
+  const origin = request ? request.headers.get("Origin") : null;
+  const allowed = [
+    "https://angolanodaiqoption.github.io",
+    "https://matheusbarroso124.github.io"
+  ];
+  let allowOrigin = "https://angolanodaiqoption.github.io";
+  if (origin && (allowed.includes(origin) || origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:"))) {
+    allowOrigin = origin;
+  }
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Master-Key, X-Access-Key",
+  };
+}
+
+function getSemanaAtual() {
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  data.setDate(data.getDate() - (data.getDay() === 0 ? 6 : data.getDay() - 1));
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+export default {
+  async fetch(request, env) {
+    const corsHeaders = getCorsHeaders(request);
+
+    // 1. Tratamento de CORS (Preflight)
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    const url = new URL(request.url);
+    const method = request.method;
+
+    // 2. Validação da Chave de Acesso via Secret da Cloudflare
+    const keyRecebida = (request.headers.get("X-Master-Key") || request.headers.get("X-Access-Key") || "").trim();
+    const masterKey = (env.MASTER_KEY || "").trim();
+    if (!masterKey || keyRecebida !== masterKey) {
+      return new Response(JSON.stringify({ erro: "Não autorizado" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    const db = env.DB || env.termo_db;
+
+    // 3. Rota: LER RANKING (GET /)
+    if (method === "GET" && (url.pathname === "/" || url.pathname === "/ranking")) {
+      try {
+        const semanaAtual = getSemanaAtual();
+
+        // Busca a data do último reset
+        const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
+        let semanaReset = configReq ? configReq.value : "";
+
+        // Se mudou de semana, reseta os tempos da semana anterior
+        if (semanaReset && semanaReset !== semanaAtual) {
+          await db.prepare("DELETE FROM partidas").run();
+          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
+          semanaReset = semanaAtual;
+        } else if (!semanaReset) {
+          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
+          semanaReset = semanaAtual;
+        }
+
+        // Busca o Top 10 Tempos da semana
+        const { results: topTempos } = await db.prepare(
+          "SELECT nome_display as nome, tempo_ms as tempoMs, avatar, historico_json, data_formatada as data FROM partidas ORDER BY tempo_ms ASC LIMIT 10"
+        ).all();
+
+        // Busca o Ranking Geral de Pontos
+        const { results: pontos } = await db.prepare(
+          "SELECT pin, nome, pontos, avatar FROM jogadores ORDER BY pontos DESC"
+        ).all();
+
+        // Formata os dados no formato idêntico ao JSONBin para o front
+        const pontuacaoGeral = {};
+        pontos.forEach(p => {
+          pontuacaoGeral[p.pin] = { nome: p.nome, pontos: p.pontos, avatar: p.avatar };
+        });
+
+        topTempos.forEach(t => {
+          t.historico = t.historico_json ? JSON.parse(t.historico_json) : [];
+          delete t.historico_json;
+        });
+
+        return new Response(JSON.stringify({ semanaReset, topTempos, pontuacaoGeral }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // 4. Rota DEFINITIVA: SALVAR NOVO RECORDE / PONTUAÇÃO (POST /salvar ou POST /)
+    if (method === "POST" && (url.pathname === "/salvar" || url.pathname === "/recorde" || url.pathname === "/")) {
+      try {
+        const body = await request.json();
+
+        // 1. TRAVAS DE SEGURANÇA E LÓGICA (Sanitization)
+        const nomeUpper = (body.nome || "").trim().toUpperCase();
+        const pinUpper = (body.pin || "").trim().toUpperCase();
+
+        if (!nomeUpper || !pinUpper) {
+          return new Response(JSON.stringify({ erro: "Nome e PIN são obrigatórios." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (nomeUpper === pinUpper) {
+          return new Response(JSON.stringify({ erro: "Por segurança, o PIN não pode ser igual ao Nome." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const tempoMs = Number(body.tempoMs) || 0;
+        const pontosGanhos = Number(body.pontosGanhos) || 0;
+        const historico = Array.isArray(body.historico) ? body.historico : [];
+
+        // Validação: não pode jogar mais de 6 vezes, tempo deve ser positivo se for registrar tempo
+        if (body.registrarTempo && (tempoMs <= 0 || historico.length > 6)) {
+          return new Response(JSON.stringify({ erro: "Dados de partida inválidos ou forjados." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (pontosGanhos < 0 || pontosGanhos > 100) {
+          return new Response(JSON.stringify({ erro: "Dados de partida inválidos ou forjados." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // 2. Garante que a semana está sincronizada
+        const semanaAtual = getSemanaAtual();
+        const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
+        const semanaReset = configReq ? configReq.value : "";
+        if (semanaReset && semanaReset !== semanaAtual) {
+          await db.prepare("DELETE FROM partidas").run();
+          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
+        }
+
+        const avatar = body.avatar || "doge";
+
+        // 3. Atualiza ou insere jogador acumulando os pontos
+        const jogadorExistente = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
+        const novosPontos = (jogadorExistente ? jogadorExistente.pontos : 0) + pontosGanhos;
+
+        await db.prepare(`
+          INSERT INTO jogadores (pin, nome, pontos, avatar, updated_at)
+          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(pin) DO UPDATE SET
+            nome = excluded.nome,
+            pontos = ?,
+            avatar = excluded.avatar,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(pinUpper, nomeUpper, novosPontos, avatar, novosPontos).run();
+
+        // 4. Se registrar tempo semanal
+        if (body.registrarTempo && tempoMs > 0) {
+          const histStr = JSON.stringify(historico);
+          const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
+          await db.prepare(`
+            INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, historico_json, data_formatada)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).bind(pinUpper, nomeUpper, tempoMs, avatar, histStr, dataStr).run();
+        }
+
+        return new Response(JSON.stringify({ sucesso: true, pontos: novosPontos }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // 5. Rota: MIGRAÇÃO (POST /migrar) -> Rota de ETL / Backup
+    if (method === "POST" && url.pathname === "/migrar") {
+      try {
+        const payload = await request.json();
+
+        // Insere o config
+        if (payload.semanaReset) {
+          await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(payload.semanaReset).run();
+        }
+
+        // Insere os jogadores (pontuacaoGeral)
+        if (payload.pontuacaoGeral) {
+          const stmtJogador = db.prepare("INSERT OR REPLACE INTO jogadores (pin, nome, pontos, avatar) VALUES (?, ?, ?, ?)");
+          for (const pin of Object.keys(payload.pontuacaoGeral)) {
+            const data = payload.pontuacaoGeral[pin];
+            await stmtJogador.bind(pin, data.nome, data.pontos, data.avatar).run();
+          }
+        }
+
+        // Insere as partidas (topTempos)
+        if (payload.topTempos) {
+          const stmtPartida = db.prepare("INSERT INTO partidas (nome_display, tempo_ms, avatar, historico_json, data_formatada) VALUES (?, ?, ?, ?, ?)");
+          for (const t of payload.topTempos) {
+            const histStr = t.historico ? JSON.stringify(t.historico) : "[]";
+            await stmtPartida.bind(t.nome, t.tempoMs, t.avatar, histStr, t.data).run();
+          }
+        }
+
+        return new Response(JSON.stringify({ sucesso: "Dados migrados para o D1 com sucesso!" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    return new Response("Not found", { status: 404, headers: corsHeaders });
+  }
+};

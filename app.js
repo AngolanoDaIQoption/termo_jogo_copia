@@ -37,9 +37,9 @@ const STORAGE_USER_NAME_KEY = "termo_user_name";
 const STORAGE_USER_AVATAR_KEY = "termo_user_avatar";
 const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
 
-// Configuração do JSONbin
-const JSONBIN_BIN_ID = "6aed5519ffd5d16053aad2c0";
-const JSONBIN_ACCESS_KEY = "$2a$10$I5.3RabYO6Jt5mqWE.pOT.EnWOeAsBKYlHXUrx69WCRC9Z9nr454.";
+// Configuração da API (Cloudflare Workers + D1)
+const API_URL = "https://termo-api.matheusbarroso124.workers.dev";
+const API_KEY = "termo_api_bcd5b29c08a610a1a8d2a8e6a31ab0ef";
 
 let tempoInicio = null;
 let tempoFinalMs = 0;
@@ -468,16 +468,16 @@ function normalizarLeaderboard(valor) {
 
 export async function obterLeaderboard() {
   try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
-      headers: { "X-Access-Key": JSONBIN_ACCESS_KEY }
+    const res = await fetch(`${API_URL}/`, {
+      headers: { "X-Master-Key": API_KEY }
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const leaderboard = normalizarLeaderboard(data.record);
+    const leaderboard = normalizarLeaderboard(data);
     localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
     return leaderboard;
   } catch (err) {
-    console.warn("Falha no JSONbin, buscando cache local:", err);
+    console.warn("Falha na API, buscando cache local:", err);
     try {
       const raw = localStorage.getItem(STORAGE_LEADERBOARD_KEY);
       const leaderboard = normalizarLeaderboard(raw ? JSON.parse(raw) : null);
@@ -531,18 +531,27 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
 
   let sincronizado = false;
   try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: "PUT",
+    const res = await fetch(`${API_URL}/salvar`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Access-Key": JSONBIN_ACCESS_KEY
+        "X-Master-Key": API_KEY
       },
-      body: JSON.stringify(leaderboard)
+      body: JSON.stringify({
+        nome: nomeDisplay,
+        pin: idConta,
+        tempoMs,
+        avatar: avatarId,
+        registrarTempo,
+        pontosGanhos,
+        historico: historicoPalpites,
+        data: new Date().toLocaleDateString("pt-BR")
+      })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     sincronizado = true;
   } catch (err) {
-    console.error("Erro ao sincronizar com JSONbin:", err);
+    console.error("Erro ao sincronizar com a API:", err);
   }
 
   return { pontosGanhos, sincronizado };
@@ -654,33 +663,19 @@ async function abrirModal(vitoria) {
               <span>Alterar</span>
             </button>
           </div>
-          <div class="flex flex-col gap-2">
-            <input 
-              type="text" 
-              id="record-name-input" 
-              maxlength="15" 
-              placeholder="SEU NOME" 
-              autocomplete="off" 
-              autocorrect="off" 
-              spellcheck="false" 
-              class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full min-w-0 focus:outline-none uppercase" 
-            />
+          <div class="flex flex-col gap-1.5 mt-1">
+            <input type="text" id="record-name-input" maxlength="15" value="${nomeSalvo}" placeholder="NOME VISÍVEL NO RANKING (EX: LUCÃO)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
+            
             <div class="flex gap-2">
-              <input
-                type="password"
-                id="record-pin-input"
-                maxlength="15"
-                placeholder="ID SECRETO (PIN)"
-                autocomplete="off"
-                class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase"
-              />
-              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
+              <div class="flex-1 flex flex-col gap-1">
+                <input type="password" id="record-pin-input" maxlength="15" value="${pinSalvo}" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
+                <span class="text-[9px] text-rose-400/90 font-medium leading-tight px-1 tracking-wide">⚠️ NÃO use senhas reais. O ID não pode ser igual ao Nome.</span>
+              </div>
+              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] h-[34px]">Salvar</button>
             </div>
           </div>
         </div>
     `;
-    lbSection.querySelector("#record-name-input").value = nomeSalvo;
-    lbSection.querySelector("#record-pin-input").value = pinSalvo;
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
       btnPremio.type = "button";
@@ -707,6 +702,12 @@ async function abrirModal(vitoria) {
           const pinInput = document.getElementById("record-pin-input");
           if (nameInput && nameInput.value.trim() && pinInput && pinInput.value.trim()) {
             
+            // --- NOVA TRAVA: Nome não pode ser igual ao PIN ---
+            if (nameInput.value.trim().toUpperCase() === pinInput.value.trim().toUpperCase()) {
+              alert("Por segurança, o seu ID Secreto não pode ser igual ao Nome visível no ranking!");
+              return;
+            }
+
             // VERIFICAÇÃO TROLL: Se escolher o avatar armadilha, toma timeout de 30 minutos!
             const avatarObjeto = AVATARES.find(a => a.id === avatarSelecionado);
             if (avatarObjeto && avatarObjeto.troll) {

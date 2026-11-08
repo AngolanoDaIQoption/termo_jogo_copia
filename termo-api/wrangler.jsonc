@@ -1,0 +1,13 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "termo-api",
+	"main": "src/index.js",
+	"compatibility_date": "2026-11-08",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "termo-db",
+			"database_id": "9483c15f-d7b6-45cb-8fd5-9e2cfb24a45e"
+		}
+	]
+}
