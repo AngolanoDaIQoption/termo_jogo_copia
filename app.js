@@ -52,6 +52,16 @@ if (THEMES_AVAILABLE.includes(themeSalvo)) {
 const API_URL = "https://termo-api.matheusbarroso124.workers.dev";
 const API_KEY = "termo_api_bcd5b29c08a610a1a8d2a8e6a31ab0ef";
 
+async function fetchApi(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 let tempoInicio = null;
 let tempoFinalMs = 0;
 let avatarSelecionado = AVATARES[0].id;
@@ -480,7 +490,7 @@ function normalizarLeaderboard(valor) {
 
 export async function obterLeaderboard() {
   try {
-    const res = await fetch(`${API_URL}/`, {
+    const res = await fetchApi(`${API_URL}/`, {
       headers: { "X-Master-Key": API_KEY }
     });
     if (!res.ok) {
@@ -516,6 +526,16 @@ function lerEventosPontuacaoPendentes() {
     throw new Error("A fila de sincronização de pontos está inválida.");
   }
   return eventos;
+}
+
+function obterLeaderboardDoCache() {
+  try {
+    const raw = localStorage.getItem(STORAGE_LEADERBOARD_KEY);
+    return normalizarLeaderboard(raw ? JSON.parse(raw) : null);
+  } catch (err) {
+    console.error("Erro ao ler o cache local do leaderboard:", err);
+    return normalizarLeaderboard(null);
+  }
 }
 
 function aplicarEventoAoLeaderboard(leaderboard, evento) {
@@ -565,7 +585,7 @@ export async function sincronizarPontuacoesPendentes() {
   while (eventosPendentes.length > 0) {
     const evento = eventosPendentes[0];
     try {
-      const res = await fetch(`${API_URL}/salvar`, {
+      const res = await fetchApi(`${API_URL}/salvar`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -610,7 +630,7 @@ export async function sincronizarPontuacoesPendentes() {
 }
 
 export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", registrarTempo = true) {
-  const leaderboard = await obterLeaderboard();
+  const leaderboard = obterLeaderboardDoCache();
   const nomeDisplay = nome.trim().toUpperCase() || "JOGADOR";
   const idConta = pin.trim().toUpperCase() || "JOGADOR_GHOST";
 
@@ -642,7 +662,7 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
 }
 
 async function salvarTempoNoRanking(idPublico, avatarId) {
-  const res = await fetch(`${API_URL}/tempo`, {
+  const res = await fetchApi(`${API_URL}/tempo`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -682,7 +702,7 @@ async function atualizarAvatarNoRanking(pin, avatarId) {
     console.error("Não foi possível atualizar o avatar dos eventos pendentes:", err);
   }
 
-  const res = await fetch(`${API_URL}/perfil/avatar`, {
+  const res = await fetchApi(`${API_URL}/perfil/avatar`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -787,10 +807,12 @@ async function abrirModal(vitoria) {
 
   const oldLb = document.getElementById("modal-leaderboard-section");
   if (oldLb) oldLb.remove();
+  let leaderboardAtualizacao = null;
 
   if (vitoria) {
     const tempoStr = formatarTempo(tempoFinalMs);
-    const leaderboard = await obterLeaderboard();
+    leaderboardAtualizacao = obterLeaderboard();
+    const leaderboard = obterLeaderboardDoCache();
     const leaderboardTempos = leaderboard.topTempos;
     
     const piorTempoCadastrado = leaderboardTempos.length > 0
@@ -859,8 +881,8 @@ async function abrirModal(vitoria) {
         </div>
       </div>
     `;
-    const tempoRankingHtml = ehNovoRecorde ? `
-      <div id="time-ranking-section" class="flex flex-col gap-2 mt-1 p-2.5 rounded-xl border border-slate-800 bg-slate-900/70">
+    const tempoRankingHtml = `
+      <div id="time-ranking-section" class="${ehNovoRecorde ? "" : "hidden"} flex flex-col gap-2 mt-1 p-2.5 rounded-xl border border-slate-800 bg-slate-900/70">
         <span class="text-[10px] font-semibold text-slate-200 uppercase tracking-wide">Seu tempo entrou no Top 10 semanal</span>
         <p class="text-[10px] text-slate-400 leading-relaxed">Escolha o ID público que aparecerá no ranking de tempo. Esse registro não precisa de PIN e não altera seus pontos gerais.</p>
         <div class="flex items-center gap-2">
@@ -869,7 +891,7 @@ async function abrirModal(vitoria) {
         </div>
         <span id="time-ranking-status" class="text-[10px] text-slate-400 text-center">O ID ficará visível no ranking desta semana.</span>
       </div>
-    ` : "";
+    `;
     lbSection.innerHTML = `
         <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${temPerfilSalvo ? "Seus pontos são salvos automaticamente" : "Informe seus dados para registrar os pontos"}</span>
         <div class="flex flex-col gap-2.5">
@@ -883,8 +905,8 @@ async function abrirModal(vitoria) {
         ${tempoRankingHtml}
     `;
     if (!temPerfilSalvo) {
-      document.getElementById("record-name-input").value = nomeSalvo;
-      document.getElementById("record-pin-input").value = pinSalvo;
+      lbSection.querySelector("#record-name-input").value = nomeSalvo;
+      lbSection.querySelector("#record-pin-input").value = pinSalvo;
     }
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
@@ -1068,6 +1090,31 @@ async function abrirModal(vitoria) {
 
   modalEndgame.classList.remove("hidden");
   modalEndgame.classList.add("flex");
+
+  if (vitoria) {
+    leaderboardAtualizacao
+      .then((leaderboardAtualizado) => {
+        const tempos = leaderboardAtualizado.topTempos;
+        const piorTempo = tempos.length > 0
+          ? tempos[tempos.length - 1].tempoMs
+          : Infinity;
+        const ehNovoRecordeAtualizado = tempos.length < 10 || tempoFinalMs < piorTempo;
+        const timeRankingSection = document.getElementById("time-ranking-section");
+        if (timeRankingSection) {
+          timeRankingSection.classList.toggle("hidden", !ehNovoRecordeAtualizado);
+        }
+
+        if (EstadoJogo.linhaAtual !== 0) {
+          modalBadge.textContent = ehNovoRecordeAtualizado ? "Novo Recorde!" : "Vitória";
+          modalBadge.className = ehNovoRecordeAtualizado
+            ? "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20"
+            : "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+        }
+      })
+      .catch((err) => {
+        console.error("Erro ao atualizar o estado do ranking semanal:", err);
+      });
+  }
 
   setTimeout(() => {
     modalCard.classList.remove("scale-95", "opacity-0");
