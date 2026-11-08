@@ -126,6 +126,7 @@ export default {
         const tempoMs = Number(body.tempoMs) || 0;
         const pontosGanhos = Number(body.pontosGanhos) || 0;
         const historico = Array.isArray(body.historico) ? body.historico : [];
+        const eventId = typeof body.eventId === "string" ? body.eventId.trim() : "";
 
         // Validação: não pode jogar mais de 6 vezes, tempo deve ser positivo se for registrar tempo
         if (body.registrarTempo && (tempoMs <= 0 || historico.length > 6)) {
@@ -142,6 +143,13 @@ export default {
           });
         }
 
+        if (body.eventId !== undefined && !/^[\w.-]{1,100}$/.test(eventId)) {
+          return new Response(JSON.stringify({ erro: "Identificador de partida inválido." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
         // 2. Garante que a semana está sincronizada
         const semanaAtual = getSemanaAtual();
         const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
@@ -152,6 +160,43 @@ export default {
         }
 
         const avatar = body.avatar || "doge";
+
+        if (eventId) {
+          const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
+          const resultado = await db.prepare(`
+            INSERT OR IGNORE INTO score_events (
+              event_id,
+              pin,
+              nome,
+              pontos,
+              avatar,
+              registrar_tempo,
+              tempo_ms,
+              historico_json,
+              data_formatada
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            eventId,
+            pinUpper,
+            nomeUpper,
+            pontosGanhos,
+            avatar,
+            body.registrarTempo ? 1 : 0,
+            tempoMs,
+            JSON.stringify(historico),
+            dataStr
+          ).run();
+          const jogador = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
+
+          return new Response(JSON.stringify({
+            sucesso: true,
+            duplicado: resultado.meta.changes === 0,
+            pontos: jogador ? jogador.pontos : 0
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
 
         // 3. Atualiza ou insere jogador acumulando os pontos
         const jogadorExistente = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
