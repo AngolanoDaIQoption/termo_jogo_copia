@@ -483,7 +483,12 @@ export async function obterLeaderboard() {
     const res = await fetch(`${API_URL}/`, {
       headers: { "X-Master-Key": API_KEY }
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error("A rota de ranking de tempo ainda não foi publicada no Worker.");
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     const data = await res.json();
     const leaderboard = normalizarLeaderboard(data);
     localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
@@ -533,6 +538,12 @@ function aplicarEventoAoLeaderboard(leaderboard, evento) {
   contaAtual.nome = evento.nome;
   contaAtual.avatar = evento.avatar;
   leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
+}
+
+function obterHistoricoPalpites() {
+  return EstadoJogo.tentativas
+    .map((linha) => linha.join(""))
+    .filter((palavra) => palavra.length === EstadoJogo.tamanhoPalavra);
 }
 
 function gerarIdEvento() {
@@ -603,10 +614,6 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
   const nomeDisplay = nome.trim().toUpperCase() || "JOGADOR";
   const idConta = pin.trim().toUpperCase() || "JOGADOR_GHOST";
 
-  const historicoPalpites = EstadoJogo.tentativas
-    .map(linha => linha.join(""))
-    .filter(palavra => palavra.length === EstadoJogo.tamanhoPalavra);
-
   const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
   const eventosPendentes = lerEventosPontuacaoPendentes();
   const evento = {
@@ -617,7 +624,7 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
     avatar: avatarId,
     registrarTempo,
     pontosGanhos,
-    historico: historicoPalpites,
+    historico: obterHistoricoPalpites(),
     data: new Date().toLocaleDateString("pt-BR")
   };
   eventosPendentes.push(evento);
@@ -634,14 +641,86 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
   return { pontosGanhos, sincronizado: resultado.sincronizado, erro: resultado.erro };
 }
 
+async function salvarTempoNoRanking(idPublico, avatarId) {
+  const res = await fetch(`${API_URL}/tempo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY
+    },
+    body: JSON.stringify({
+      id: idPublico,
+      tempoMs: tempoFinalMs,
+      avatar: avatarId,
+      historico: obterHistoricoPalpites(),
+      data: new Date().toLocaleDateString("pt-BR")
+    })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const resultado = await res.json();
+  if (resultado.sucesso !== true) {
+    throw new Error("A API não confirmou o registro do tempo.");
+  }
+}
+
+async function atualizarAvatarNoRanking(pin, avatarId) {
+  const pinNormalizado = pin.trim().toUpperCase();
+  try {
+    const eventosPendentes = lerEventosPontuacaoPendentes();
+    let filaAlterada = false;
+    eventosPendentes.forEach((evento) => {
+      if (evento.pin === pinNormalizado) {
+        evento.avatar = avatarId;
+        filaAlterada = true;
+      }
+    });
+    if (filaAlterada) {
+      localStorage.setItem(STORAGE_PENDING_SCORE_EVENTS_KEY, JSON.stringify(eventosPendentes));
+    }
+  } catch (err) {
+    console.error("Não foi possível atualizar o avatar dos eventos pendentes:", err);
+  }
+
+  const res = await fetch(`${API_URL}/perfil/avatar`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY
+    },
+    body: JSON.stringify({ pin, avatar: avatarId })
+  });
+  const resultado = await res.json();
+  if (!res.ok || resultado.sucesso !== true) {
+    throw new Error(resultado.erro || `HTTP ${res.status}`);
+  }
+
+  try {
+    const leaderboard = normalizarLeaderboard(
+      JSON.parse(localStorage.getItem(STORAGE_LEADERBOARD_KEY) || "null")
+    );
+    if (leaderboard.pontuacaoGeral[pinNormalizado]) {
+      leaderboard.pontuacaoGeral[pinNormalizado].avatar = avatarId;
+      localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+    }
+  } catch (err) {
+    console.error("O avatar foi atualizado no ranking, mas não foi possível atualizar o cache local:", err);
+  }
+}
+
 // Abrir Modal de Avatares
 function abrirModalDeAvatares() {
+  btnConfirmAvatar.disabled = false;
+  btnConfirmAvatar.textContent = "Confirmar Escolha";
+  const avatarSaveStatus = document.getElementById("avatar-save-status");
+  if (avatarSaveStatus) avatarSaveStatus.textContent = "";
+
   avatarGridContainer.innerHTML = AVATARES
     .filter((item) => !item.oculto) // <--- ESTA LINHA ESCONDE O GARY
     .map((item) => `
     <div 
       data-id="${item.id}"
-      class="avatar-card-item flex flex-col items-center justify-between p-3 rounded-xl border-2 ${item.id === avatarSelecionado ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-900/50 opacity-70'} hover:opacity-100 cursor-pointer transition-all duration-150"
+      class="avatar-card-item flex flex-col items-center justify-between p-3 rounded-xl border-2 ${item.id === avatarSelecionado ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-900/50'} cursor-pointer transition-all duration-150"
     >
       <img src="${item.src}" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border border-slate-700/60 shadow-md" alt="${item.nome}" />
       <span class="text-xs font-semibold text-slate-200 text-center truncate max-w-full mt-1.5">${item.nome}</span>
@@ -656,9 +735,9 @@ function abrirModalDeAvatares() {
     card.addEventListener("click", () => {
       cards.forEach((c) => {
         c.classList.remove("border-amber-400", "bg-amber-400/10");
-        c.classList.add("border-slate-800", "bg-slate-900/50", "opacity-70");
+        c.classList.add("border-slate-800", "bg-slate-900/50");
       });
-      card.classList.remove("border-slate-800", "bg-slate-900/50", "opacity-70");
+      card.classList.remove("border-slate-800", "bg-slate-900/50");
       card.classList.add("border-amber-400", "bg-amber-400/10");
       avatarSelecionado = card.getAttribute("data-id");
     });
@@ -671,13 +750,35 @@ function fecharModalDeAvatares() {
 }
 
 btnCloseAvatarModal.addEventListener("click", fecharModalDeAvatares);
-btnConfirmAvatar.addEventListener("click", () => {
+btnConfirmAvatar.addEventListener("click", async () => {
   localStorage.setItem(STORAGE_USER_AVATAR_KEY, avatarSelecionado);
   const currentAvatarPreview = document.getElementById("current-avatar-preview");
   if (currentAvatarPreview) {
     currentAvatarPreview.src = obterSrcAvatar(avatarSelecionado);
   }
-  fecharModalDeAvatares();
+
+  const pin = localStorage.getItem(STORAGE_USER_PIN_KEY);
+  if (!pin) {
+    fecharModalDeAvatares();
+    return;
+  }
+
+  const avatarSaveStatus = document.getElementById("avatar-save-status");
+  btnConfirmAvatar.disabled = true;
+  btnConfirmAvatar.textContent = "Atualizando...";
+  if (avatarSaveStatus) avatarSaveStatus.textContent = "Atualizando avatar no ranking geral...";
+
+  try {
+    await atualizarAvatarNoRanking(pin, avatarSelecionado);
+    fecharModalDeAvatares();
+  } catch (err) {
+    console.error("Erro ao atualizar o avatar no ranking geral:", err);
+    btnConfirmAvatar.disabled = false;
+    btnConfirmAvatar.textContent = "Tentar novamente";
+    if (avatarSaveStatus) {
+      avatarSaveStatus.textContent = "Avatar salvo neste navegador, mas não foi atualizado no ranking. Tente novamente.";
+    }
+  }
 });
 
 // Controle do Modal Autoral
@@ -758,6 +859,17 @@ async function abrirModal(vitoria) {
         </div>
       </div>
     `;
+    const tempoRankingHtml = ehNovoRecorde ? `
+      <div id="time-ranking-section" class="flex flex-col gap-2 mt-1 p-2.5 rounded-xl border border-slate-800 bg-slate-900/70">
+        <span class="text-[10px] font-semibold text-slate-200 uppercase tracking-wide">Seu tempo entrou no Top 10 semanal</span>
+        <p class="text-[10px] text-slate-400 leading-relaxed">Escolha o ID público que aparecerá no ranking de tempo. Esse registro não precisa de PIN e não altera seus pontos gerais.</p>
+        <div class="flex items-center gap-2">
+          <input type="text" id="time-ranking-id" maxlength="15" placeholder="ID PÚBLICO" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
+          <button id="btn-save-time" type="button" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs px-3 rounded-lg transition-colors cursor-pointer shrink-0 h-[34px]">Publicar</button>
+        </div>
+        <span id="time-ranking-status" class="text-[10px] text-slate-400 text-center">O ID ficará visível no ranking desta semana.</span>
+      </div>
+    ` : "";
     lbSection.innerHTML = `
         <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${temPerfilSalvo ? "Seus pontos são salvos automaticamente" : "Informe seus dados para registrar os pontos"}</span>
         <div class="flex flex-col gap-2.5">
@@ -768,6 +880,7 @@ async function abrirModal(vitoria) {
             <button id="btn-retry-record-sync" type="button" hidden class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">Tentar sincronizar novamente</button>
           </div>
         </div>
+        ${tempoRankingHtml}
     `;
     if (!temPerfilSalvo) {
       document.getElementById("record-name-input").value = nomeSalvo;
@@ -846,7 +959,7 @@ async function abrirModal(vitoria) {
                 pinInput.value,
                 tempoFinalMs,
                 avatarSelecionado,
-                ehNovoRecorde
+                false
               );
               btnSave.textContent = resultado.sincronizado
                 ? `Salvo (+${resultado.pontosGanhos} pts)`
@@ -880,6 +993,49 @@ async function abrirModal(vitoria) {
         });
       }
 
+      const btnSaveTime = document.getElementById("btn-save-time");
+      if (btnSaveTime) {
+        btnSaveTime.addEventListener("click", async () => {
+          const timeIdInput = document.getElementById("time-ranking-id");
+          const timeStatus = document.getElementById("time-ranking-status");
+          const idPublico = timeIdInput?.value.trim();
+          if (!timeIdInput || !timeStatus) return;
+          if (!idPublico) {
+            timeStatus.textContent = "Informe o ID público para publicar seu tempo.";
+            timeIdInput.focus();
+            return;
+          }
+          if (!/^[a-zA-Z0-9_-]{1,15}$/.test(idPublico)) {
+            timeStatus.textContent = "Use até 15 caracteres: letras, números, hífen ou sublinhado.";
+            timeIdInput.focus();
+            return;
+          }
+
+          btnSaveTime.disabled = true;
+          btnSaveTime.textContent = "Salvando...";
+          timeStatus.textContent = "Registrando seu tempo no ranking semanal...";
+          try {
+            await salvarTempoNoRanking(idPublico, avatarSelecionado);
+            timeIdInput.disabled = true;
+            btnSaveTime.classList.add("time-published");
+            btnSaveTime.innerHTML = `
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="m5 12 4 4L19 6"></path>
+              </svg>
+              <span>No ranking</span>
+            `;
+            timeStatus.textContent = "Tempo publicado no ranking semanal.";
+          } catch (err) {
+            console.error("Erro ao registrar o tempo no ranking semanal:", err);
+            btnSaveTime.disabled = false;
+            btnSaveTime.textContent = "Tentar novamente";
+            timeStatus.textContent = err.message.includes("ainda não foi publicada")
+              ? "O Worker ainda não foi atualizado. Publique a API e tente novamente."
+              : "Não foi possível publicar o tempo. Verifique a conexão e tente novamente.";
+          }
+        });
+      }
+
       if (temPerfilSalvo && saveStatus) {
         try {
           const resultado = await salvarNovoRecorde(
@@ -887,7 +1043,7 @@ async function abrirModal(vitoria) {
             pinSalvo,
             tempoFinalMs,
             avatarSelecionado,
-            ehNovoRecorde
+            false
           );
           saveStatus.textContent = resultado.sincronizado
             ? "Pontos sincronizados com o ranking."
