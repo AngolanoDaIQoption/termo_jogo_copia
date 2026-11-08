@@ -6,7 +6,11 @@ const gridEl = document.getElementById("grid");
 const keyboardEl = document.getElementById("keyboard");
 const statusEl = document.getElementById("status-message");
 const btnRestart = document.getElementById("btn-restart");
-const themeSelect = document.getElementById("theme-select");
+const btnThemePicker = document.getElementById("btn-theme-picker");
+const modalThemePicker = document.getElementById("modal-theme-picker");
+const btnCloseThemePicker = document.getElementById("btn-close-theme-picker");
+const btnCancelTheme = document.getElementById("btn-cancel-theme");
+const btnApplyTheme = document.getElementById("btn-apply-theme");
 
 // Elementos dos Modais
 const modalEndgame = document.getElementById("modal-endgame");
@@ -35,7 +39,14 @@ const STORAGE_USER_PIN_KEY = "termo_user_pin";
 const STORAGE_USER_NAME_KEY = "termo_user_name";
 const STORAGE_USER_AVATAR_KEY = "termo_user_avatar";
 const STORAGE_PENDING_SCORE_EVENTS_KEY = "termo_pending_score_events_v1";
+const STORAGE_THEME_KEY = "termo_theme_v1";
+const THEMES_AVAILABLE = ["dark", "cyber", "kawaii"];
 const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
+
+const themeSalvo = localStorage.getItem(STORAGE_THEME_KEY);
+if (THEMES_AVAILABLE.includes(themeSalvo)) {
+  document.body.setAttribute("data-theme", themeSalvo);
+}
 
 // Configuração da API (Cloudflare Workers + D1)
 const API_URL = "https://termo-api.matheusbarroso124.workers.dev";
@@ -45,6 +56,7 @@ let tempoInicio = null;
 let tempoFinalMs = 0;
 let avatarSelecionado = AVATARES[0].id;
 let timerInterval = null;
+let themeAtOpening = document.body.getAttribute("data-theme") || "dark";
 
 const TECLADO_LAYOUT = [
   ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
@@ -717,8 +729,8 @@ async function abrirModal(vitoria) {
         <div class="flex items-center gap-3">
           <img id="current-avatar-preview" src="${obterSrcAvatar(avatarSelecionado)}" class="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow" alt="Avatar" />
           <div class="flex flex-col">
-            <span class="text-xs font-semibold text-slate-200">Avatar</span>
-            <span class="text-[10px] text-slate-400">Escolha a sua imagem</span>
+            <span class="modal-avatar-title text-xs font-semibold text-slate-200">Avatar</span>
+            <span class="modal-avatar-description text-[10px] text-slate-400">Escolha a sua imagem</span>
           </div>
         </div>
         <button id="btn-open-avatar-picker" type="button" class="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/80 transition cursor-pointer">
@@ -764,6 +776,7 @@ async function abrirModal(vitoria) {
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
       btnPremio.type = "button";
+      btnPremio.id = "btn-claim-prize";
       btnPremio.className = "w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold tracking-wide text-xs py-2.5 px-4 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2";
       btnPremio.innerHTML = `
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -917,6 +930,14 @@ function fecharModal() {
 
 // Listeners de Teclado e Ações
 document.addEventListener("keydown", (e) => {
+  if (!modalThemePicker.classList.contains("hidden")) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      fecharSeletorDeTema(false);
+    }
+    return;
+  }
+
   const tecla = e.key.toUpperCase();
   if (
     tecla === "ENTER" ||
@@ -934,8 +955,58 @@ document.addEventListener("keydown", (e) => {
 btnRestart.addEventListener("click", () => inicializarJogo(true));
 modalBtnRestart.addEventListener("click", () => inicializarJogo(true));
 
-themeSelect.addEventListener("change", (e) => {
-  document.body.setAttribute("data-theme", e.target.value);
+function selecionarTema(tema) {
+  if (!THEMES_AVAILABLE.includes(tema)) return;
+  document.body.setAttribute("data-theme", tema);
+  document.querySelectorAll("[data-theme-choice]").forEach((choice) => {
+    choice.setAttribute("aria-pressed", String(choice.getAttribute("data-theme-choice") === tema));
+  });
+}
+
+function abrirSeletorDeTema() {
+  themeAtOpening = document.body.getAttribute("data-theme") || "dark";
+  selecionarTema(themeAtOpening);
+  modalThemePicker.classList.remove("hidden");
+  modalThemePicker.classList.add("flex");
+  modalThemePicker.setAttribute("aria-hidden", "false");
+  const selectedChoice = modalThemePicker.querySelector(`[data-theme-choice="${themeAtOpening}"]`);
+  (selectedChoice || btnCloseThemePicker).focus();
+}
+
+function fecharSeletorDeTema(aplicar) {
+  if (aplicar) {
+    localStorage.setItem(STORAGE_THEME_KEY, document.body.getAttribute("data-theme") || "dark");
+  } else {
+    selecionarTema(themeAtOpening);
+  }
+  modalThemePicker.classList.remove("flex");
+  modalThemePicker.classList.add("hidden");
+  modalThemePicker.setAttribute("aria-hidden", "true");
+  btnThemePicker.focus();
+}
+
+btnThemePicker.addEventListener("click", abrirSeletorDeTema);
+btnCloseThemePicker.addEventListener("click", () => fecharSeletorDeTema(false));
+btnCancelTheme.addEventListener("click", () => fecharSeletorDeTema(false));
+btnApplyTheme.addEventListener("click", () => fecharSeletorDeTema(true));
+modalThemePicker.addEventListener("click", (event) => {
+  if (event.target === modalThemePicker) fecharSeletorDeTema(false);
+});
+modalThemePicker.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab") return;
+  const focusableButtons = Array.from(modalThemePicker.querySelectorAll("button:not([disabled])"));
+  const firstButton = focusableButtons[0];
+  const lastButton = focusableButtons[focusableButtons.length - 1];
+  if (event.shiftKey && document.activeElement === firstButton) {
+    event.preventDefault();
+    lastButton.focus();
+  } else if (!event.shiftKey && document.activeElement === lastButton) {
+    event.preventDefault();
+    firstButton.focus();
+  }
+});
+modalThemePicker.querySelectorAll("[data-theme-choice]").forEach((choice) => {
+  choice.addEventListener("click", () => selecionarTema(choice.getAttribute("data-theme-choice")));
 });
 
 inicializarJogo(false);
