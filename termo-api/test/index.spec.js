@@ -55,6 +55,23 @@ async function atualizarAvatar(body, key = MASTER_KEY) {
 	return { response, data: await response.json() };
 }
 
+async function atualizarNick(body, key = MASTER_KEY) {
+	const request = new Request("https://termo-api.test/perfil/nome", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"X-Master-Key": key,
+		},
+		body: JSON.stringify(body),
+	});
+	const response = await worker.fetch(
+		request,
+		{ DB: env.DB, MASTER_KEY },
+		createExecutionContext(),
+	);
+	return { response, data: await response.json() };
+}
+
 describe("POST /salvar idempotent score events", () => {
 	beforeEach(async () => {
 		await env.DB.batch([
@@ -171,6 +188,55 @@ describe("POST /salvar idempotent score events", () => {
 
 		expect(second.data.duplicado).toBe(false);
 		expect(player.pontos).toBe(20);
+	});
+
+	it("updates the profile nickname without changing points", async () => {
+		await env.DB.prepare(
+			"INSERT INTO jogadores (pin, nome, pontos, avatar) VALUES ('PIN-NICK', 'ANTIGO', 120, 'doge')",
+		).run();
+
+		const result = await atualizarNick({ pin: "pin-nick", nome: "NOVO NICK!" });
+		const player = await env.DB.prepare(
+			"SELECT nome, pontos FROM jogadores WHERE pin = 'PIN-NICK'",
+		).first();
+
+		expect(result.response.status).toBe(200);
+		expect(result.data.nome).toBe("NOVO NICK!");
+		expect(player.nome).toBe("NOVO NICK!");
+		expect(player.pontos).toBe(120);
+	});
+
+	it("rejects a nickname equal to the account PIN", async () => {
+		const result = await atualizarNick({ pin: "PIN-NICK", nome: "pin-nick" });
+
+		expect(result.response.status).toBe(400);
+		expect(result.data.erro).toBe("PIN ou nick inválido.");
+	});
+
+	it("does not restore an outdated nickname when a pending score event arrives", async () => {
+		await env.DB.prepare(
+			"INSERT INTO jogadores (pin, nome, pontos, avatar) VALUES ('PIN-NICK', 'NICK ATUAL', 120, 'doge')",
+		).run();
+
+		const result = await salvarEvento({
+			eventId: "pending-old-nickname",
+			nome: "NICK ANTIGO",
+			pin: "PIN-NICK",
+			tempoMs: 5000,
+			avatar: "doge",
+			registrarTempo: false,
+			pontosGanhos: 10,
+			historico: ["MEIAS"],
+			data: "08/11/2026",
+		});
+		const player = await env.DB.prepare(
+			"SELECT nome, pontos FROM jogadores WHERE pin = 'PIN-NICK'",
+		).first();
+
+		expect(result.response.status).toBe(200);
+		expect(result.data.nome).toBe("NICK ATUAL");
+		expect(player.nome).toBe("NICK ATUAL");
+		expect(player.pontos).toBe(130);
 	});
 
 	it("rejects malformed event identifiers", async () => {

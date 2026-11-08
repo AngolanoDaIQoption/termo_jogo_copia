@@ -137,7 +137,43 @@ export default {
       }
     }
 
-    // 5. Rota: ATUALIZAR AVATAR DO PERFIL sem alterar os pontos acumulados
+    // 5. Rota: ATUALIZAR NICK DO PERFIL sem alterar os pontos acumulados
+    if (method === "POST" && url.pathname === "/perfil/nome") {
+      try {
+        const body = await request.json();
+        const pin = typeof body.pin === "string" ? body.pin.trim().toUpperCase() : "";
+        const nome = typeof body.nome === "string" ? body.nome.trim().toUpperCase() : "";
+
+        if (!pin || pin.length > 15 || !nome || nome.length > 15 || /[\u0000-\u001f\u007f]/.test(nome) || nome === pin) {
+          return new Response(JSON.stringify({ erro: "PIN ou nick inválido." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const resultado = await db.prepare(
+          "UPDATE jogadores SET nome = ?, updated_at = CURRENT_TIMESTAMP WHERE pin = ?"
+        ).bind(nome, pin).run();
+
+        if (resultado.meta.changes === 0) {
+          return new Response(JSON.stringify({ erro: "Perfil não encontrado no ranking geral." }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        return new Response(JSON.stringify({ sucesso: true, nome }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ erro: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // 6. Rota: ATUALIZAR AVATAR DO PERFIL sem alterar os pontos acumulados
     if (method === "POST" && url.pathname === "/perfil/avatar") {
       try {
         const body = await request.json();
@@ -173,7 +209,7 @@ export default {
       }
     }
 
-    // 6. Rota DEFINITIVA: SALVAR NOVO RECORDE / PONTUAÇÃO (POST /salvar ou POST /)
+    // 7. Rota DEFINITIVA: SALVAR NOVO RECORDE / PONTUAÇÃO (POST /salvar ou POST /)
     if (method === "POST" && (url.pathname === "/salvar" || url.pathname === "/recorde" || url.pathname === "/")) {
       try {
         const body = await request.json();
@@ -230,6 +266,9 @@ export default {
 
         if (eventId) {
           const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
+          const jogadorAnterior = await db.prepare(
+            "SELECT nome FROM jogadores WHERE pin = ?"
+          ).bind(pinUpper).first();
           const resultado = await db.prepare(`
             INSERT OR IGNORE INTO score_events (
               event_id,
@@ -254,30 +293,43 @@ export default {
             JSON.stringify(historico),
             dataStr
           ).run();
-          const jogador = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
+          let jogador = await db.prepare(
+            "SELECT pontos, nome FROM jogadores WHERE pin = ?"
+          ).bind(pinUpper).first();
+
+          if (jogadorAnterior && jogador && jogador.nome !== jogadorAnterior.nome) {
+            await db.prepare(
+              "UPDATE jogadores SET nome = ? WHERE pin = ?"
+            ).bind(jogadorAnterior.nome, pinUpper).run();
+            jogador = { ...jogador, nome: jogadorAnterior.nome };
+          }
 
           return new Response(JSON.stringify({
             sucesso: true,
             duplicado: resultado.meta.changes === 0,
-            pontos: jogador ? jogador.pontos : 0
+            pontos: jogador ? jogador.pontos : 0,
+            nome: jogador ? jogador.nome : nomeUpper
           }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" }
           });
         }
 
         // 3. Atualiza ou insere jogador acumulando os pontos
-        const jogadorExistente = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
+        const jogadorExistente = await db.prepare(
+          "SELECT pontos, nome FROM jogadores WHERE pin = ?"
+        ).bind(pinUpper).first();
         const novosPontos = (jogadorExistente ? jogadorExistente.pontos : 0) + pontosGanhos;
+        const nomeAtual = jogadorExistente ? jogadorExistente.nome : nomeUpper;
 
         await db.prepare(`
           INSERT INTO jogadores (pin, nome, pontos, avatar, updated_at)
           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(pin) DO UPDATE SET
-            nome = excluded.nome,
+            nome = ?,
             pontos = ?,
             avatar = excluded.avatar,
             updated_at = CURRENT_TIMESTAMP
-        `).bind(pinUpper, nomeUpper, novosPontos, avatar, novosPontos).run();
+        `).bind(pinUpper, nomeAtual, novosPontos, avatar, nomeAtual, novosPontos).run();
 
         // 4. Se registrar tempo semanal
         if (body.registrarTempo && tempoMs > 0) {
@@ -286,7 +338,7 @@ export default {
           await db.prepare(`
             INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, historico_json, data_formatada)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(pinUpper, nomeUpper, tempoMs, avatar, histStr, dataStr).run();
+          `).bind(pinUpper, nomeAtual, tempoMs, avatar, histStr, dataStr).run();
         }
 
         return new Response(JSON.stringify({ sucesso: true, pontos: novosPontos }), {

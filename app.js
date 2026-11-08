@@ -560,6 +560,14 @@ function aplicarEventoAoLeaderboard(leaderboard, evento) {
   leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
 }
 
+function aplicarNomeAoCache(nome, pin) {
+  const pinNormalizado = pin.trim().toUpperCase();
+  const leaderboard = obterLeaderboardDoCache();
+  const contaAtual = leaderboard.pontuacaoGeral[pinNormalizado];
+  if (contaAtual) contaAtual.nome = nome;
+  localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+}
+
 function obterHistoricoPalpites() {
   return EstadoJogo.tentativas
     .map((linha) => linha.join(""))
@@ -612,7 +620,7 @@ export async function sincronizarPontuacoesPendentes() {
           pontos: 0,
           avatar: evento.avatar
         };
-        contaAtual.nome = evento.nome;
+        contaAtual.nome = resultado.nome || contaAtual.nome || evento.nome;
         contaAtual.pontos = resultado.pontos;
         contaAtual.avatar = evento.avatar;
         leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
@@ -726,6 +734,44 @@ async function atualizarAvatarNoRanking(pin, avatarId) {
   } catch (err) {
     console.error("O avatar foi atualizado no ranking, mas não foi possível atualizar o cache local:", err);
   }
+}
+
+async function atualizarNickNoRanking(pin, nome) {
+  const res = await fetchApi(`${API_URL}/perfil/nome`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY
+    },
+    body: JSON.stringify({ pin, nome })
+  });
+  const resultado = await res.json();
+  if (!res.ok || resultado.sucesso !== true) {
+    throw new Error(resultado.erro || `HTTP ${res.status}`);
+  }
+
+  const nomeAtualizado = resultado.nome || nome.trim().toUpperCase();
+  const pinNormalizado = pin.trim().toUpperCase();
+  localStorage.setItem(STORAGE_USER_NAME_KEY, nomeAtualizado);
+  aplicarNomeAoCache(nomeAtualizado, pinNormalizado);
+
+  try {
+    const eventosPendentes = lerEventosPontuacaoPendentes();
+    let filaAlterada = false;
+    eventosPendentes.forEach((evento) => {
+      if (evento.pin === pinNormalizado) {
+        evento.nome = nomeAtualizado;
+        filaAlterada = true;
+      }
+    });
+    if (filaAlterada) {
+      localStorage.setItem(STORAGE_PENDING_SCORE_EVENTS_KEY, JSON.stringify(eventosPendentes));
+    }
+  } catch (err) {
+    console.error("O nick foi atualizado no ranking, mas não foi possível atualizar eventos pendentes:", err);
+  }
+
+  return nomeAtualizado;
 }
 
 // Abrir Modal de Avatares
@@ -892,6 +938,16 @@ async function abrirModal(vitoria) {
         <span id="time-ranking-status" class="text-[10px] text-slate-400 text-center">O ID ficará visível no ranking desta semana.</span>
       </div>
     `;
+    const nickEditorHtml = temPerfilSalvo ? `
+      <div id="nickname-editor" class="flex flex-col gap-1.5 mt-1 p-2.5 rounded-xl border border-slate-800 bg-slate-900/70">
+        <label for="ranking-nickname-input" class="text-[10px] font-semibold text-slate-200 uppercase tracking-wide">Nick no ranking geral</label>
+        <div class="flex items-center gap-2">
+          <input type="text" id="ranking-nickname-input" maxlength="15" value="${nomeSalvo.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
+          <button id="btn-update-nickname" type="button" class="bg-slate-700 hover:bg-slate-600 text-white font-semibold text-xs px-3 rounded-lg transition-colors cursor-pointer shrink-0 h-[34px]">Atualizar</button>
+        </div>
+        <span id="nickname-save-status" class="text-[10px] text-slate-400">O nick atual está preenchido. Só é possível atualizar uma vez nesta partida.</span>
+      </div>
+    ` : "";
     lbSection.innerHTML = `
         <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider text-center block">${temPerfilSalvo ? "Seus pontos são salvos automaticamente" : "Informe seus dados para registrar os pontos"}</span>
         <div class="flex flex-col gap-2.5">
@@ -900,6 +956,7 @@ async function abrirModal(vitoria) {
           <div class="flex flex-col gap-1.5">
             <span id="record-save-status" class="text-[10px] text-slate-400 text-center">${temPerfilSalvo ? "Salvando pontos..." : ""}</span>
             <button id="btn-retry-record-sync" type="button" hidden class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">Tentar sincronizar novamente</button>
+            ${nickEditorHtml}
           </div>
         </div>
         ${tempoRankingHtml}
@@ -951,6 +1008,50 @@ async function abrirModal(vitoria) {
       };
       if (retryButton) {
         retryButton.addEventListener("click", tentarSincronizar);
+      }
+
+      const nicknameInput = document.getElementById("ranking-nickname-input");
+      const updateNicknameButton = document.getElementById("btn-update-nickname");
+      const nicknameStatus = document.getElementById("nickname-save-status");
+      if (nicknameInput && updateNicknameButton && nicknameStatus) {
+        let nicknameUpdateAttempted = false;
+        updateNicknameButton.addEventListener("click", async () => {
+          if (nicknameUpdateAttempted) return;
+
+          const nickname = nicknameInput.value.trim().toUpperCase();
+          if (!nickname || nickname.length > 15 || /[\u0000-\u001f\u007f]/.test(nickname)) {
+            nicknameStatus.textContent = "Informe um nick de até 15 caracteres.";
+            nicknameInput.focus();
+            return;
+          }
+          if (nickname === pinSalvo.trim().toUpperCase()) {
+            nicknameStatus.textContent = "Por segurança, o nick não pode ser igual ao PIN.";
+            nicknameInput.focus();
+            return;
+          }
+          if (nickname === nomeSalvo.trim().toUpperCase()) {
+            nicknameStatus.textContent = "Esse já é o nick atual do ranking.";
+            return;
+          }
+
+          updateNicknameButton.disabled = true;
+          updateNicknameButton.textContent = "Salvando...";
+          nicknameInput.disabled = true;
+          nicknameUpdateAttempted = true;
+          nicknameStatus.textContent = "Atualizando seu nick no ranking geral...";
+          try {
+            const nomeAtualizado = await atualizarNickNoRanking(pinSalvo, nickname);
+            nicknameInput.value = nomeAtualizado;
+            nicknameStatus.textContent = "Nick atualizado no ranking geral.";
+            updateNicknameButton.textContent = "Atualizado";
+          } catch (err) {
+            console.error("Erro ao atualizar o nick do ranking:", err);
+            nicknameStatus.textContent = err.message.includes("Perfil não encontrado")
+              ? "Não encontramos esse perfil. Você poderá tentar novamente na próxima partida."
+              : "Não foi possível atualizar o nick. Você poderá tentar novamente na próxima partida.";
+            updateNicknameButton.textContent = "Tentativa usada";
+          }
+        });
       }
 
       const btnSave = document.getElementById("btn-save-record");
