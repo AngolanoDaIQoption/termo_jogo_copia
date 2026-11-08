@@ -105,6 +105,131 @@
       opacity: 0.8;
     }
 
+    body[data-theme="cyber"] #modal-ranking .glass-card {
+      background: rgba(24, 24, 27, 0.96);
+      border-color: #3f3f46;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .glass-card > div:first-child {
+      border-color: #3f3f46;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .glass-card > div:nth-child(2) {
+      background: #09090b;
+      border-color: #3f3f46;
+    }
+
+    body[data-theme="cyber"] #modal-ranking #tab-tempos,
+    body[data-theme="cyber"] #modal-ranking #tab-pontos {
+      color: #a1a1aa;
+    }
+
+    body[data-theme="cyber"] #modal-ranking #tab-tempos.bg-slate-800,
+    body[data-theme="cyber"] #modal-ranking #tab-pontos.bg-slate-800 {
+      background: #27272a;
+      border-color: #e11d48;
+      color: #fda4af;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .ranking-player-card {
+      background: rgba(9, 9, 11, 0.75);
+      border-color: #3f3f46;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .ranking-history {
+      background: #18181b;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .ranking-history-label {
+      color: #a1a1aa;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .ranking-history-value {
+      color: #86efac;
+    }
+
+    body[data-theme="cyber"] #modal-ranking .ranking-score {
+      color: #fda4af;
+    }
+
+    body[data-theme="cyber"] #modal-ranking #ranking-list-container > span {
+      color: #a1a1aa;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .glass-card {
+      background: rgba(255, 247, 251, 0.98);
+      border-color: #e9a8c8;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .glass-card > div:first-child {
+      border-color: #f0c4d9;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .glass-card > div:first-child h3,
+    body[data-theme="kawaii"] #modal-ranking #btn-close-ranking {
+      color: #4a1d36;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .glass-card > div:nth-child(2) {
+      background: #fce7f3;
+      border-color: #e9a8c8;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking #tab-tempos,
+    body[data-theme="kawaii"] #modal-ranking #tab-pontos {
+      color: #80536a;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking #tab-tempos.bg-slate-800,
+    body[data-theme="kawaii"] #modal-ranking #tab-pontos.bg-slate-800 {
+      background: #fff;
+      border-color: #db2777;
+      color: #9d174d;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking #tab-tempos svg,
+    body[data-theme="kawaii"] #modal-ranking #tab-pontos svg {
+      color: currentColor;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-player-card {
+      background: #fff;
+      border-color: #e9a8c8;
+      color: #4a1d36;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-player-name {
+      color: #4a1d36;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-history {
+      background: #fff7fb;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-history-label {
+      color: #80536a;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-history-value {
+      color: #047857;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-score {
+      color: #9d174d;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .ranking-player-card img {
+      border-color: #e9a8c8;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking #ranking-list-container > span {
+      color: #80536a;
+    }
+
+    body[data-theme="kawaii"] #modal-ranking .glass-card > div:first-child h3 svg {
+      color: #db2777;
+    }
+
     .glass-card {
       background: rgba(17, 24, 39, 0.85);
       backdrop-filter: blur(12px);
@@ -306,8 +431,8 @@
     function criarJogador(item, indice, pontuacao = false) {
       const row = document.createElement("div");
       row.className = pontuacao
-        ? "flex justify-between items-center bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/80 text-xs"
-        : "flex flex-col bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 text-xs gap-1.5";
+        ? "ranking-player-card flex justify-between items-center bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/80 text-xs"
+        : "ranking-player-card flex flex-col bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 text-xs gap-1.5";
 
       const playerWrapper = document.createElement("div");
       playerWrapper.className = "flex items-center gap-2.5";
@@ -318,14 +443,14 @@
       img.alt = "Avatar";
 
       const player = document.createElement("span");
-      player.className = "font-medium text-slate-200";
+      player.className = "ranking-player-name font-medium text-slate-200";
       player.textContent = `#${indice + 1} ${item.nome || "JOGADOR"}`;
       playerWrapper.append(img, player);
 
       const scoreOrTime = document.createElement("span");
-      scoreOrTime.className = pontuacao
+      scoreOrTime.className = `ranking-score ${pontuacao
         ? "font-black text-fuchsia-400 tracking-wide"
-        : "font-mono text-amber-400 font-semibold";
+        : "font-mono text-amber-400 font-semibold"}`;
       scoreOrTime.textContent = pontuacao
         ? `${Number(item.pontos) || 0} PTS`
         : formatarTempo(item.tempoMs);
@@ -341,12 +466,12 @@
       row.appendChild(topRow);
 
       const histRow = document.createElement("div");
-      histRow.className = "bg-slate-950/50 px-2 py-1 rounded text-[10px] font-mono text-slate-400 flex items-center justify-between";
+      histRow.className = "ranking-history bg-slate-950/50 px-2 py-1 rounded text-[10px] font-mono text-slate-400 flex items-center justify-between";
       const label = document.createElement("span");
-      label.className = "text-slate-500 font-sans";
+      label.className = "ranking-history-label text-slate-500 font-sans";
       label.textContent = "Jogada:";
       const history = document.createElement("span");
-      history.className = "text-emerald-400/90 font-bold tracking-wide";
+      history.className = "ranking-history-value text-emerald-400/90 font-bold tracking-wide";
       history.textContent = Array.isArray(item.historico) && item.historico.length
         ? item.historico.join(" ➔ ")
         : "Sem histórico";
