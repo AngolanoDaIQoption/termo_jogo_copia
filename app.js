@@ -233,7 +233,7 @@ function renderizarTeclado() {
   keyboardEl.innerHTML = "";
   TECLADO_LAYOUT.forEach((linha) => {
     const rowEl = document.createElement("div");
-    rowEl.className = "flex justify-center gap-1 w-full";
+    rowEl.className = "flex justify-center gap-1.5 sm:gap-1 w-full mb-1 sm:mb-0";
     linha.forEach((key) => {
       const btn = document.createElement("button");
       btn.id = `key-${key}`;
@@ -242,9 +242,12 @@ function renderizarTeclado() {
         key === "ENTER" || key === "BACKSPACE"
           ? "px-3 text-xs flex-1 font-bold"
           : "w-9 text-sm font-semibold";
-      btn.className = `${width} h-12 bg-tema-tecla text-tema-tecla-texto rounded hover:bg-tema-caixa-ativa transition flex items-center justify-center cursor-pointer neon-border`;
+      btn.className = `${width} h-14 sm:h-12 bg-tema-tecla text-tema-tecla-texto rounded hover:bg-tema-caixa-ativa active:scale-95 active:brightness-125 touch-manipulation transition flex items-center justify-center cursor-pointer neon-border`;
 
-      btn.addEventListener("click", () => tratarEntrada(key));
+      btn.addEventListener("click", () => {
+        if (navigator.vibrate) navigator.vibrate(15);
+        tratarEntrada(key);
+      });
       rowEl.appendChild(btn);
     });
     keyboardEl.appendChild(rowEl);
