@@ -189,7 +189,7 @@ function renderizarGrade() {
         const estiloNeutro = letra
           ? "border-tema-borda-ativa bg-tema-caixa-ativa"
           : "border-tema-borda bg-tema-caixa";
-        tile.className = `${tileSize} border-2 ${estiloNeutro} text-[var(--text-principal)] flex items-center justify-center font-extrabold rounded uppercase transition-all duration-150 cursor-pointer select-none neon-border`;
+        tile.className = `${tileSize} tile-current border-2 ${estiloNeutro} text-[var(--text-principal)] flex items-center justify-center font-extrabold rounded uppercase transition-all duration-150 cursor-pointer select-none neon-border`;
       } else {
         tile.className = `${tileSize} tile-inactive bg-tema-caixa border border-tema-borda flex items-center justify-center font-extrabold text-tema-tecla-texto rounded uppercase select-none pointer-events-none opacity-40 neon-border`;
       }
