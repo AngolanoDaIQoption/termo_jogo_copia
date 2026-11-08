@@ -660,6 +660,7 @@ function fecharModalDeAvatares() {
 
 btnCloseAvatarModal.addEventListener("click", fecharModalDeAvatares);
 btnConfirmAvatar.addEventListener("click", () => {
+  localStorage.setItem(STORAGE_USER_AVATAR_KEY, avatarSelecionado);
   const currentAvatarPreview = document.getElementById("current-avatar-preview");
   if (currentAvatarPreview) {
     currentAvatarPreview.src = obterSrcAvatar(avatarSelecionado);
