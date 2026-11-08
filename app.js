@@ -621,8 +621,8 @@ async function abrirModal(vitoria) {
     const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
 
     if (EstadoJogo.linhaAtual === 0) {
-      modalBadge.textContent = "🏆 DE PRIMEIRA!";
-      modalBadge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-widest bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30 animate-pulse";
+      modalBadge.textContent = "DE PRIMEIRA!";
+      modalBadge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-widest bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/25";
       modalTitle.textContent = "GÊNIO DO TERMO!";
     } else {
       modalBadge.textContent = ehNovoRecorde ? "Novo Recorde!" : "Vitória";
@@ -663,15 +663,20 @@ async function abrirModal(vitoria) {
               <span>Alterar</span>
             </button>
           </div>
-          <div class="flex flex-col gap-1.5 mt-1">
-            <input type="text" id="record-name-input" maxlength="15" value="${nomeSalvo}" placeholder="NOME VISÍVEL NO RANKING (EX: GIGACHAD67)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
+          <div class="flex flex-col gap-2 mt-1">
+            <input type="text" id="record-name-input" maxlength="15" value="${nomeSalvo}" placeholder="NOME VISÍVEL NO RANKING (EX: GIGACHAD67)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
             
-            <div class="flex gap-2">
-              <div class="flex-1 flex flex-col gap-1">
-                <input type="password" id="record-pin-input" maxlength="15" value="${pinSalvo}" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
-                <span class="text-[9px] text-rose-400/90 font-medium leading-tight px-1 tracking-wide">⚠️ NÃO use senhas reais. O ID não pode ser igual ao Nome.</span>
+            <div class="flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <input type="password" id="record-pin-input" maxlength="15" value="${pinSalvo}" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-medium px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none focus:border-slate-500 uppercase" />
+                <button id="btn-save-record" type="button" class="bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-slate-950 font-semibold text-xs px-3 rounded-lg transition-colors cursor-pointer shrink-0 min-w-[72px] h-[34px] focus:outline-none focus:ring-2 focus:ring-amber-300/50">Salvar</button>
               </div>
-              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] h-[34px]">Salvar</button>
+              <span class="flex items-start gap-1.5 text-[9px] text-rose-300/90 font-medium leading-tight px-1 tracking-wide">
+                <svg class="w-3 h-3 shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 4h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0Z"></path>
+                </svg>
+                <span>Não use senhas reais. O ID não pode ser igual ao nome.</span>
+              </span>
             </div>
           </div>
         </div>
@@ -679,8 +684,13 @@ async function abrirModal(vitoria) {
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
       btnPremio.type = "button";
-      btnPremio.className = "w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black tracking-widest text-xs py-3 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center";
-      btnPremio.textContent = "🎁 RESGATAR PRÊMIO MÁXIMO";
+      btnPremio.className = "w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold tracking-wide text-xs py-2.5 px-4 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2";
+      btnPremio.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 12v10H4V12m16 0H4m16 0h1a2 2 0 0 0 2-2V7H1v3a2 2 0 0 0 2 2h1m8 0v10m0-10H7.5a2.5 2.5 0 1 1 2.5-2.5V12Zm0 0h4.5a2.5 2.5 0 1 0-2.5-2.5V12Z"></path>
+        </svg>
+        <span>Resgatar prêmio máximo</span>
+      `;
       btnPremio.addEventListener("click", () => {
         window.open("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "_blank", "noopener,noreferrer");
       });
@@ -726,9 +736,9 @@ async function abrirModal(vitoria) {
                 ehNovoRecorde
               );
               btnSave.textContent = resultado.sincronizado
-                ? `Salvo ✓ (+${resultado.pontosGanhos} pts)`
+                ? `Salvo (+${resultado.pontosGanhos} pts)`
                 : `Local (+${resultado.pontosGanhos} pts)`;
-              btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg shrink-0 min-w-[72px] text-center";
+              btnSave.className = "bg-emerald-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center";
               if (!resultado.sincronizado) {
                 statusEl.textContent = "Pontuação salva neste dispositivo; não foi possível sincronizar com o ranking.";
               }
