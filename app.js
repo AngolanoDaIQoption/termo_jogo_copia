@@ -663,33 +663,19 @@ async function abrirModal(vitoria) {
               <span>Alterar</span>
             </button>
           </div>
-          <div class="flex flex-col gap-2">
-            <input 
-              type="text" 
-              id="record-name-input" 
-              maxlength="15" 
-              placeholder="SEU NOME" 
-              autocomplete="off" 
-              autocorrect="off" 
-              spellcheck="false" 
-              class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full min-w-0 focus:outline-none uppercase" 
-            />
+          <div class="flex flex-col gap-1.5 mt-1">
+            <input type="text" id="record-name-input" maxlength="15" value="${nomeSalvo}" placeholder="NOME VISÍVEL NO RANKING (EX: LUCÃO)" autocomplete="off" autocorrect="off" spellcheck="false" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
+            
             <div class="flex gap-2">
-              <input
-                type="password"
-                id="record-pin-input"
-                maxlength="15"
-                placeholder="ID SECRETO (PIN)"
-                autocomplete="off"
-                class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 flex-1 min-w-0 focus:outline-none uppercase"
-              />
-              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] text-center">Salvar</button>
+              <div class="flex-1 flex flex-col gap-1">
+                <input type="password" id="record-pin-input" maxlength="15" value="${pinSalvo}" placeholder="ID SECRETO (EX: MACACO44)" autocomplete="off" class="bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 w-full focus:outline-none uppercase" />
+                <span class="text-[9px] text-rose-400/90 font-medium leading-tight px-1 tracking-wide">⚠️ NÃO use senhas reais. O ID não pode ser igual ao Nome.</span>
+              </div>
+              <button id="btn-save-record" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-2.5 py-2 rounded-lg transition cursor-pointer shrink-0 min-w-[72px] h-[34px]">Salvar</button>
             </div>
           </div>
         </div>
     `;
-    lbSection.querySelector("#record-name-input").value = nomeSalvo;
-    lbSection.querySelector("#record-pin-input").value = pinSalvo;
     if (EstadoJogo.linhaAtual === 0) {
       const btnPremio = document.createElement("button");
       btnPremio.type = "button";
@@ -716,6 +702,12 @@ async function abrirModal(vitoria) {
           const pinInput = document.getElementById("record-pin-input");
           if (nameInput && nameInput.value.trim() && pinInput && pinInput.value.trim()) {
             
+            // --- NOVA TRAVA: Nome não pode ser igual ao PIN ---
+            if (nameInput.value.trim().toUpperCase() === pinInput.value.trim().toUpperCase()) {
+              alert("Por segurança, o seu ID Secreto não pode ser igual ao Nome visível no ranking!");
+              return;
+            }
+
             // VERIFICAÇÃO TROLL: Se escolher o avatar armadilha, toma timeout de 30 minutos!
             const avatarObjeto = AVATARES.find(a => a.id === avatarSelecionado);
             if (avatarObjeto && avatarObjeto.troll) {

@@ -1,8 +1,19 @@
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Master-Key, X-Access-Key",
-};
+function getCorsHeaders(request) {
+  const origin = request ? request.headers.get("Origin") : null;
+  const allowed = [
+    "https://angolanodaiqoption.github.io",
+    "https://matheusbarroso124.github.io"
+  ];
+  let allowOrigin = "https://angolanodaiqoption.github.io";
+  if (origin && (allowed.includes(origin) || origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:"))) {
+    allowOrigin = origin;
+  }
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Master-Key, X-Access-Key",
+  };
+}
 
 function getSemanaAtual() {
   const data = new Date();
@@ -16,6 +27,8 @@ function getSemanaAtual() {
 
 export default {
   async fetch(request, env) {
+    const corsHeaders = getCorsHeaders(request);
+
     // 1. Tratamento de CORS (Preflight)
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
@@ -91,9 +104,46 @@ export default {
     if (method === "POST" && (url.pathname === "/salvar" || url.pathname === "/recorde" || url.pathname === "/")) {
       try {
         const body = await request.json();
-        const semanaAtual = getSemanaAtual();
 
-        // Garante que a semana está sincronizada
+        // 1. TRAVAS DE SEGURANÇA E LÓGICA (Sanitization)
+        const nomeUpper = (body.nome || "").trim().toUpperCase();
+        const pinUpper = (body.pin || "").trim().toUpperCase();
+
+        if (!nomeUpper || !pinUpper) {
+          return new Response(JSON.stringify({ erro: "Nome e PIN são obrigatórios." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (nomeUpper === pinUpper) {
+          return new Response(JSON.stringify({ erro: "Por segurança, o PIN não pode ser igual ao Nome." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const tempoMs = Number(body.tempoMs) || 0;
+        const pontosGanhos = Number(body.pontosGanhos) || 0;
+        const historico = Array.isArray(body.historico) ? body.historico : [];
+
+        // Validação: não pode jogar mais de 6 vezes, tempo deve ser positivo se for registrar tempo
+        if (body.registrarTempo && (tempoMs <= 0 || historico.length > 6)) {
+          return new Response(JSON.stringify({ erro: "Dados de partida inválidos ou forjados." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (pontosGanhos < 0 || pontosGanhos > 100) {
+          return new Response(JSON.stringify({ erro: "Dados de partida inválidos ou forjados." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // 2. Garante que a semana está sincronizada
+        const semanaAtual = getSemanaAtual();
         const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
         const semanaReset = configReq ? configReq.value : "";
         if (semanaReset && semanaReset !== semanaAtual) {
@@ -101,13 +151,10 @@ export default {
           await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
         }
 
-        const pin = (body.pin || "JOGADOR_GHOST").trim().toUpperCase();
-        const nome = (body.nome || "JOGADOR").trim().toUpperCase();
         const avatar = body.avatar || "doge";
-        const pontosGanhos = Number(body.pontosGanhos) || 0;
 
-        // Atualiza ou insere jogador acumulando os pontos
-        const jogadorExistente = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pin).first();
+        // 3. Atualiza ou insere jogador acumulando os pontos
+        const jogadorExistente = await db.prepare("SELECT pontos FROM jogadores WHERE pin = ?").bind(pinUpper).first();
         const novosPontos = (jogadorExistente ? jogadorExistente.pontos : 0) + pontosGanhos;
 
         await db.prepare(`
@@ -118,16 +165,16 @@ export default {
             pontos = ?,
             avatar = excluded.avatar,
             updated_at = CURRENT_TIMESTAMP
-        `).bind(pin, nome, novosPontos, avatar, novosPontos).run();
+        `).bind(pinUpper, nomeUpper, novosPontos, avatar, novosPontos).run();
 
-        // Se registrar tempo
-        if (body.registrarTempo && body.tempoMs) {
-          const histStr = body.historico ? JSON.stringify(body.historico) : "[]";
+        // 4. Se registrar tempo semanal
+        if (body.registrarTempo && tempoMs > 0) {
+          const histStr = JSON.stringify(historico);
           const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
           await db.prepare(`
             INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, historico_json, data_formatada)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(pin, nome, Number(body.tempoMs), avatar, histStr, dataStr).run();
+          `).bind(pinUpper, nomeUpper, tempoMs, avatar, histStr, dataStr).run();
         }
 
         return new Response(JSON.stringify({ sucesso: true, pontos: novosPontos }), {
