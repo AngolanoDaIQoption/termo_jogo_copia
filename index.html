@@ -9,8 +9,102 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            tema: {
+              fundo: "var(--bg-fundo)",
+              caixa: "var(--bg-caixa)",
+              "caixa-ativa": "var(--bg-caixa-ativa)",
+              borda: "var(--border-caixa)",
+              "borda-ativa": "var(--border-caixa-ativa)",
+              tecla: "var(--bg-tecla)",
+              "tecla-texto": "var(--text-tecla)"
+            }
+          }
+        }
+      }
+    };
+  </script>
   <style>
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    :root,
+    [data-theme="dark"] {
+      --bg-fundo: #0b0f17;
+      --bg-caixa: rgba(15, 23, 42, 0.4);
+      --bg-caixa-ativa: #1e293b;
+      --border-caixa: #334155;
+      --border-caixa-ativa: #64748b;
+      --bg-tecla: #334155;
+      --text-tecla: #f8fafc;
+      --text-principal: #f1f5f9;
+    }
+
+    [data-theme="cyber"] {
+      --bg-fundo: #09090b;
+      --bg-caixa: #18181b;
+      --bg-caixa-ativa: #27272a;
+      --border-caixa: #3f3f46;
+      --border-caixa-ativa: #e11d48;
+      --bg-tecla: #18181b;
+      --text-tecla: #f4f4f5;
+      --text-principal: #f4f4f5;
+    }
+
+    [data-theme="kawaii"] {
+      --bg-fundo: #fff7fb;
+      --bg-caixa: #fce7f3;
+      --bg-caixa-ativa: #fff;
+      --border-caixa: #e9a8c8;
+      --border-caixa-ativa: #db2777;
+      --bg-tecla: #fff;
+      --text-tecla: #9d174d;
+      --text-principal: #4a1d36;
+    }
+
+    body {
+      background-color: var(--bg-fundo);
+      color: var(--text-principal);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    .neon-border {
+      box-shadow: none;
+    }
+
+    [data-theme="cyber"] .neon-border {
+      box-shadow: 0 0 10px rgba(225, 29, 72, 0.5);
+    }
+
+    body[data-theme="kawaii"] header h1 {
+      color: var(--text-principal);
+    }
+
+    body[data-theme="kawaii"] header {
+      border-color: #f0c4d9;
+    }
+
+    body[data-theme="kawaii"] header button,
+    body[data-theme="kawaii"] header select {
+      background-color: #fff;
+      color: var(--text-principal);
+      border-color: #e9a8c8;
+    }
+
+    body[data-theme="kawaii"] header button:hover,
+    body[data-theme="kawaii"] header select:hover {
+      background-color: #fce7f3;
+    }
+
+    body[data-theme="kawaii"] #status-message {
+      color: #705569;
+    }
+
+    body[data-theme="kawaii"] .tile-inactive {
+      opacity: 0.8;
+    }
+
     .glass-card {
       background: rgba(17, 24, 39, 0.85);
       backdrop-filter: blur(12px);
@@ -37,7 +131,7 @@
     }
   </style>
 </head>
-<body id="app-body" class="bg-[#0b0f17] text-slate-100 min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300 select-none relative">
+<body id="app-body" data-theme="dark" class="min-h-screen flex flex-col justify-between items-center p-4 transition-colors duration-300 select-none relative">
 
   <!-- Header Adaptável -->
   <header class="w-full max-w-md flex justify-between items-center py-2 sm:py-3 border-b border-slate-800/80">
@@ -56,7 +150,8 @@
       </button>
       <select id="theme-select" class="bg-slate-900 text-[11px] sm:text-xs font-semibold text-slate-300 border border-slate-800 rounded-lg px-1.5 sm:px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-slate-700 transition">
         <option value="dark">Dark</option>
-        <option value="cyberpunk">Cyber</option>
+        <option value="cyber">Cyber</option>
+        <option value="kawaii">Hello Kitty</option>
       </select>
       <button id="btn-restart" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 font-semibold text-[11px] sm:text-xs px-2 py-1.5 sm:px-3 rounded-lg transition active:scale-95 cursor-pointer shrink-0">
         Novo Jogo

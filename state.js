@@ -30,14 +30,3 @@ export async function gerarHashSHA256(texto) {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
-
-export const TEMAS = {
-  dark: {
-    body: "bg-slate-900 text-white",
-    cardEmpty: "border-slate-700 text-white"
-  },
-  cyberpunk: {
-    body: "bg-zinc-950 text-yellow-400",
-    cardEmpty: "border-pink-500 text-yellow-400"
-  }
-};
