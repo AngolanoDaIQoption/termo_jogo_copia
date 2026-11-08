@@ -37,9 +37,9 @@ const STORAGE_USER_NAME_KEY = "termo_user_name";
 const STORAGE_USER_AVATAR_KEY = "termo_user_avatar";
 const TABELA_PONTOS = [100, 80, 60, 40, 20, 10];
 
-// Configuração do JSONbin
-const JSONBIN_BIN_ID = "6aed5519ffd5d16053aad2c0";
-const JSONBIN_ACCESS_KEY = "$2a$10$I5.3RabYO6Jt5mqWE.pOT.EnWOeAsBKYlHXUrx69WCRC9Z9nr454.";
+// Configuração da API (Cloudflare Workers + D1)
+const API_URL = "https://termo-api.matheusbarroso124.workers.dev";
+const API_KEY = "termo_api_bcd5b29c08a610a1a8d2a8e6a31ab0ef";
 
 let tempoInicio = null;
 let tempoFinalMs = 0;
@@ -468,16 +468,16 @@ function normalizarLeaderboard(valor) {
 
 export async function obterLeaderboard() {
   try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
-      headers: { "X-Access-Key": JSONBIN_ACCESS_KEY }
+    const res = await fetch(`${API_URL}/`, {
+      headers: { "X-Master-Key": API_KEY }
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const leaderboard = normalizarLeaderboard(data.record);
+    const leaderboard = normalizarLeaderboard(data);
     localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
     return leaderboard;
   } catch (err) {
-    console.warn("Falha no JSONbin, buscando cache local:", err);
+    console.warn("Falha na API, buscando cache local:", err);
     try {
       const raw = localStorage.getItem(STORAGE_LEADERBOARD_KEY);
       const leaderboard = normalizarLeaderboard(raw ? JSON.parse(raw) : null);
@@ -531,18 +531,27 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
 
   let sincronizado = false;
   try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: "PUT",
+    const res = await fetch(`${API_URL}/salvar`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Access-Key": JSONBIN_ACCESS_KEY
+        "X-Master-Key": API_KEY
       },
-      body: JSON.stringify(leaderboard)
+      body: JSON.stringify({
+        nome: nomeDisplay,
+        pin: idConta,
+        tempoMs,
+        avatar: avatarId,
+        registrarTempo,
+        pontosGanhos,
+        historico: historicoPalpites,
+        data: new Date().toLocaleDateString("pt-BR")
+      })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     sincronizado = true;
   } catch (err) {
-    console.error("Erro ao sincronizar com JSONbin:", err);
+    console.error("Erro ao sincronizar com a API:", err);
   }
 
   return { pontosGanhos, sincronizado };

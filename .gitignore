@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+termo-api/node_modules/
+
+# Cloudflare & Environment Variables
+.wrangler/
+termo-api/.wrangler/
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+termo-api/.vscode/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
