@@ -33,6 +33,7 @@ const timeoutCountdown = document.getElementById("timeout-countdown");
 
 const CLASSES_FOCO = ["ring-2", "ring-tema-borda-ativa"];
 const STORAGE_PARTIDA_KEY = "termo_partida_atual_v1";
+const STORAGE_GAME_ID_KEY = "termo_game_id_v1";
 const STORAGE_LEADERBOARD_KEY = "termo_leaderboard_v1";
 const STORAGE_TIMEOUT_KEY = "termo_user_timeout_until_v1";
 const STORAGE_USER_PIN_KEY = "termo_user_pin";
@@ -64,6 +65,7 @@ async function fetchApi(url, options = {}) {
 
 let tempoInicio = null;
 let tempoFinalMs = 0;
+let gameIdPartida = null;
 let avatarSelecionado = AVATARES[0].id;
 let timerInterval = null;
 let themeAtOpening = document.body.getAttribute("data-theme") || "dark";
@@ -136,7 +138,8 @@ function salvarEstadoLocal() {
     linhaAtual: EstadoJogo.linhaAtual,
     colunaAtual: EstadoJogo.colunaAtual,
     fimDeJogo: EstadoJogo.fimDeJogo,
-    tempoInicio: tempoInicio
+    tempoInicio: tempoInicio,
+    gameId: gameIdPartida
   };
   localStorage.setItem(STORAGE_PARTIDA_KEY, JSON.stringify(dados));
 }
@@ -170,6 +173,8 @@ async function inicializarJogo(forcadoNovoJogo = false) {
     EstadoJogo.colunaAtual = partidaSalva.colunaAtual;
     EstadoJogo.fimDeJogo = partidaSalva.fimDeJogo;
     tempoInicio = partidaSalva.tempoInicio;
+    gameIdPartida = partidaSalva.gameId || localStorage.getItem(STORAGE_GAME_ID_KEY) || gerarIdEvento();
+    localStorage.setItem(STORAGE_GAME_ID_KEY, gameIdPartida);
 
     statusEl.textContent = "Adivinhe a palavra de 5 letras";
     renderizarGrade();
@@ -178,6 +183,8 @@ async function inicializarJogo(forcadoNovoJogo = false) {
     selecionarCelula(EstadoJogo.linhaAtual, EstadoJogo.colunaAtual);
   } else {
     limparEstadoSalvo();
+    gameIdPartida = gerarIdEvento();
+    localStorage.setItem(STORAGE_GAME_ID_KEY, gameIdPartida);
     statusEl.textContent = "Buscando palavra na API...";
     
     const palavra = await obterPalavraAleatoria();
@@ -434,11 +441,16 @@ function verificarPalpite() {
     statusEl.textContent = "Parabéns! Você venceu!";
     EstadoJogo.fimDeJogo = true;
     limparEstadoSalvo();
+    localStorage.removeItem(STORAGE_GAME_ID_KEY);
     setTimeout(() => abrirModal(true), 600);
   } else if (r === 5) {
     statusEl.textContent = `Fim de jogo! A palavra era: ${EstadoJogo.palavraSecreta}`;
     EstadoJogo.fimDeJogo = true;
     limparEstadoSalvo();
+    registrarResultadoSemVitoria("loss").catch((err) => {
+      console.error("Não foi possível registrar a derrota para a streak:", err);
+    });
+    localStorage.removeItem(STORAGE_GAME_ID_KEY);
     setTimeout(() => abrirModal(false), 600);
   } else {
     EstadoJogo.linhaAtual++;
@@ -548,7 +560,8 @@ function obterLeaderboardDoCache() {
 }
 
 function aplicarEventoAoLeaderboard(leaderboard, evento) {
-  if (evento.registrarTempo) {
+  const resultadoPartida = evento.resultadoPartida || "win";
+  if (resultadoPartida === "win" && evento.registrarTempo) {
     leaderboard.topTempos.push({
       nome: evento.nome,
       tempoMs: evento.tempoMs,
@@ -562,11 +575,25 @@ function aplicarEventoAoLeaderboard(leaderboard, evento) {
 
   const contaAtual = Object.prototype.hasOwnProperty.call(leaderboard.pontuacaoGeral, evento.pin)
     ? leaderboard.pontuacaoGeral[evento.pin]
-    : { nome: evento.nome, pontos: 0, avatar: evento.avatar };
-  contaAtual.pontos += evento.pontosGanhos;
+    : { nome: evento.nome, pontos: 0, avatar: evento.avatar, streak: 0 };
+  if (resultadoPartida === "win") {
+    const streakAtualizada = (Number(contaAtual.streak) || 0) + 1;
+    contaAtual.pontos += calcularPontosComStreak(evento.pontosGanhos, streakAtualizada);
+    contaAtual.streak = streakAtualizada;
+  } else {
+    contaAtual.streak = 0;
+  }
   contaAtual.nome = evento.nome;
   contaAtual.avatar = evento.avatar;
   leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
+}
+
+function obterMultiplicadorStreak(streak) {
+  return streak > 0 ? Math.min(streak + 3, 8) / 4 : 1;
+}
+
+function calcularPontosComStreak(pontosBase, streak) {
+  return Math.round(pontosBase * obterMultiplicadorStreak(streak));
 }
 
 function aplicarNomeAoCache(nome, pin) {
@@ -590,6 +617,37 @@ function gerarIdEvento() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function registrarResultadoSemVitoria(resultadoPartida) {
+  const pin = (localStorage.getItem(STORAGE_USER_PIN_KEY) || "").trim().toUpperCase();
+  const nome = (localStorage.getItem(STORAGE_USER_NAME_KEY) || "").trim().toUpperCase();
+  if (!pin || !nome) return { sincronizado: true };
+
+  const gameId = gameIdPartida || localStorage.getItem(STORAGE_GAME_ID_KEY) || gerarIdEvento();
+  const evento = {
+    eventId: `${gameId}.${resultadoPartida}`,
+    nome,
+    pin,
+    tempoMs: 0,
+    avatar: localStorage.getItem(STORAGE_USER_AVATAR_KEY) || AVATARES[0].id,
+    registrarTempo: false,
+    pontosGanhos: 0,
+    resultadoPartida,
+    historico: [],
+    data: new Date().toLocaleDateString("pt-BR")
+  };
+
+  const eventosPendentes = lerEventosPontuacaoPendentes();
+  if (!eventosPendentes.some((pendente) => pendente.eventId === evento.eventId)) {
+    eventosPendentes.push(evento);
+    localStorage.setItem(STORAGE_PENDING_SCORE_EVENTS_KEY, JSON.stringify(eventosPendentes));
+    const leaderboard = obterLeaderboardDoCache();
+    aplicarEventoAoLeaderboard(leaderboard, evento);
+    localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
+  }
+
+  return sincronizarPontuacoesPendentes();
+}
+
 export async function sincronizarPontuacoesPendentes() {
   let eventosPendentes;
   try {
@@ -599,6 +657,7 @@ export async function sincronizarPontuacoesPendentes() {
     return { sincronizado: false, erro: err.message };
   }
 
+  const resultados = [];
   while (eventosPendentes.length > 0) {
     const evento = eventosPendentes[0];
     try {
@@ -613,8 +672,13 @@ export async function sincronizarPontuacoesPendentes() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const resultado = await res.json();
-      if (resultado.sucesso !== true || !Number.isFinite(resultado.pontos)) {
-        throw new Error("A API retornou uma confirmação inválida.");
+      if (
+        resultado.sucesso !== true ||
+        !Number.isFinite(resultado.pontos) ||
+        !Number.isFinite(resultado.pontosGanhos) ||
+        !Number.isFinite(resultado.streak)
+      ) {
+        throw new Error("A API não confirmou os pontos e a streak. Verifique se o Worker foi atualizado.");
       }
 
       eventosPendentes.shift();
@@ -632,18 +696,33 @@ export async function sincronizarPontuacoesPendentes() {
         contaAtual.nome = resultado.nome || contaAtual.nome || evento.nome;
         contaAtual.pontos = resultado.pontos;
         contaAtual.avatar = evento.avatar;
+        if (Number.isFinite(resultado.streakAtual)) {
+          contaAtual.streak = resultado.streakAtual;
+        } else if (Number.isFinite(resultado.streak)) {
+          contaAtual.streak = resultado.streak;
+        }
         leaderboard.pontuacaoGeral[evento.pin] = contaAtual;
         localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
       } catch (err) {
         console.error("A API confirmou os pontos, mas não foi possível atualizar o cache local:", err);
       }
+      resultados.push({
+        eventId: evento.eventId,
+        resultadoPartida: evento.resultadoPartida || "win",
+        pontosBase: evento.pontosGanhos,
+        pontosGanhos: Number.isFinite(resultado.pontosGanhos)
+          ? resultado.pontosGanhos
+          : evento.pontosGanhos,
+        streak: Number.isFinite(resultado.streak) ? resultado.streak : null,
+        multiplicador: Number.isFinite(resultado.multiplicador) ? resultado.multiplicador : null
+      });
     } catch (err) {
       console.error("Erro ao sincronizar pontuação pendente:", err);
-      return { sincronizado: false, erro: err.message };
+      return { sincronizado: false, erro: err.message, resultados };
     }
   }
 
-  return { sincronizado: true };
+  return { sincronizado: true, resultados };
 }
 
 export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", registrarTempo = true) {
@@ -652,6 +731,15 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
   const idConta = pin.trim().toUpperCase() || "JOGADOR_GHOST";
 
   const pontosGanhos = TABELA_PONTOS[EstadoJogo.linhaAtual] || 10;
+  const streakAtual = Number(leaderboard.pontuacaoGeral[idConta]?.streak) || 0;
+  const streakEstimado = streakAtual + 1;
+  const resultadoEstimado = {
+    pontosBase: pontosGanhos,
+    pontosGanhos: calcularPontosComStreak(pontosGanhos, streakEstimado),
+    streak: streakEstimado,
+    multiplicador: obterMultiplicadorStreak(streakEstimado),
+    confirmado: false
+  };
   const eventosPendentes = lerEventosPontuacaoPendentes();
   const evento = {
     eventId: gerarIdEvento(),
@@ -661,6 +749,7 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
     avatar: avatarId,
     registrarTempo,
     pontosGanhos,
+    resultadoPartida: "win",
     historico: obterHistoricoPalpites(),
     data: new Date().toLocaleDateString("pt-BR")
   };
@@ -675,7 +764,19 @@ export async function salvarNovoRecorde(nome, pin, tempoMs, avatarId = "doge", r
   localStorage.setItem(STORAGE_LEADERBOARD_KEY, JSON.stringify(leaderboard));
 
   const resultado = await sincronizarPontuacoesPendentes();
-  return { pontosGanhos, sincronizado: resultado.sincronizado, erro: resultado.erro };
+  const resultadoEvento = resultado.resultados?.find((item) => item.eventId === evento.eventId);
+  return {
+    pontosGanhos,
+    sincronizado: resultado.sincronizado,
+    erro: resultado.erro,
+    resultado: resultadoEvento
+      ? {
+          ...resultadoEvento,
+          pontosBase: pontosGanhos,
+          confirmado: true
+        }
+      : resultadoEstimado
+  };
 }
 
 async function salvarTempoNoRanking(idPublico, avatarId) {
@@ -889,7 +990,7 @@ async function abrirModal(vitoria) {
     }
 
     modalTitle.className = "text-xl font-bold text-white tracking-tight";
-    modalBody.textContent = `Resolvido em ${EstadoJogo.linhaAtual + 1} tentativa(s) • Tempo: ${tempoStr} (+${pontosGanhos} pts)`;
+    modalBody.textContent = `Resolvido em ${EstadoJogo.linhaAtual + 1} tentativa(s) • Tempo: ${tempoStr}`;
     modalBtnRestart.className = "w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-all duration-200 cursor-pointer";
 
     const lbSection = document.createElement("div");
@@ -963,7 +1064,8 @@ async function abrirModal(vitoria) {
           ${avatarEditorHtml}
           ${cadastroHtml}
           <div class="flex flex-col gap-1.5">
-            <span id="record-save-status" class="text-[10px] text-slate-400 text-center">${temPerfilSalvo ? "Salvando pontos..." : ""}</span>
+            <span id="record-save-status" class="text-[10px] text-slate-400 text-center">${temPerfilSalvo ? "Salvando pontos e streak..." : ""}</span>
+            <span id="streak-score-summary" class="text-[10px] text-slate-300 text-center" aria-live="polite">${temPerfilSalvo ? "Calculando pontos e streak..." : `Pontos-base: +${pontosGanhos}. Informe seus dados para calcular a streak.`}</span>
             <button id="btn-retry-record-sync" type="button" hidden class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">Tentar sincronizar novamente</button>
             ${nickEditorHtml}
           </div>
@@ -1001,16 +1103,34 @@ async function abrirModal(vitoria) {
 
       const saveStatus = document.getElementById("record-save-status");
       const retryButton = document.getElementById("btn-retry-record-sync");
+      const streakSummary = document.getElementById("streak-score-summary");
+      const mostrarResumoStreak = (resultado) => {
+        if (!streakSummary || !resultado || !Number.isFinite(resultado.streak)) return;
+        const multiplicador = obterMultiplicadorStreak(resultado.streak)
+          .toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+        const pontosBase = resultado.pontosBase ?? TABELA_PONTOS[EstadoJogo.linhaAtual] ?? 10;
+        const bonus = resultado.pontosGanhos - pontosBase;
+        const prefixo = resultado.confirmado === false ? "Estimativa local • " : "";
+        streakSummary.textContent = `${prefixo}Streak: ${resultado.streak} ${resultado.streak === 1 ? "vitória" : "vitórias"} • x${multiplicador} • Base: +${pontosBase} • Bônus: +${bonus} • Total: +${resultado.pontosGanhos} pts`;
+      };
       const tentarSincronizar = async () => {
         if (!saveStatus || !retryButton) return;
         retryButton.disabled = true;
         retryButton.textContent = "Sincronizando...";
         const resultado = await sincronizarPontuacoesPendentes();
         if (resultado.sincronizado) {
-          saveStatus.textContent = "Pontos sincronizados com o ranking.";
+          saveStatus.textContent = "Pontos e streak sincronizados com o ranking.";
+          const vitoriasSincronizadas = resultado.resultados?.filter((item) => item.resultadoPartida === "win") || [];
+          const resultadoVitoria = vitoriasSincronizadas[vitoriasSincronizadas.length - 1];
+          if (resultadoVitoria) {
+            resultadoVitoria.confirmado = true;
+            mostrarResumoStreak(resultadoVitoria);
+          }
           retryButton.hidden = true;
         } else {
-          saveStatus.textContent = "Não foi possível sincronizar. Os pontos continuam salvos neste navegador.";
+          saveStatus.textContent = resultado.erro?.includes("Worker foi atualizado")
+            ? "Atualize o Worker para sincronizar a streak; os pontos continuam salvos neste navegador."
+            : "Não foi possível sincronizar. Os pontos continuam salvos neste navegador.";
           retryButton.textContent = "Tentar sincronizar novamente";
         }
         retryButton.disabled = false;
@@ -1093,16 +1213,24 @@ async function abrirModal(vitoria) {
                 avatarSelecionado,
                 false
               );
+              if (resultado.resultado) {
+                mostrarResumoStreak(resultado.resultado);
+              }
               btnSave.textContent = resultado.sincronizado
-                ? `Salvo (+${resultado.pontosGanhos} pts)`
+                ? `Salvo (+${resultado.resultado?.pontosGanhos ?? resultado.pontosGanhos} pts)`
                 : `Local (+${resultado.pontosGanhos} pts)`;
               btnSave.className = resultado.sincronizado
                 ? "bg-emerald-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center"
                 : "bg-amber-600 text-white font-semibold text-xs px-3 rounded-lg shrink-0 min-w-[72px] h-[34px] text-center";
               if (saveStatus) {
                 saveStatus.textContent = resultado.sincronizado
-                  ? "Pontos sincronizados com o ranking."
-                  : "Pontos salvos neste navegador; não foi possível sincronizar.";
+                  ? "Pontos e streak sincronizados com o ranking."
+                  : resultado.erro?.includes("Worker foi atualizado")
+                    ? "Atualize o Worker para sincronizar a streak; os pontos continuam salvos neste navegador."
+                    : "Pontos salvos neste navegador; não foi possível sincronizar.";
+              }
+              if (!resultado.sincronizado && streakSummary) {
+                streakSummary.textContent = "A streak e o bônus são uma estimativa até sincronizar.";
               }
               if (retryButton) {
                 retryButton.hidden = resultado.sincronizado;
@@ -1177,9 +1305,16 @@ async function abrirModal(vitoria) {
             avatarSelecionado,
             false
           );
+          if (resultado.resultado) {
+            mostrarResumoStreak(resultado.resultado);
+          } else if (streakSummary) {
+            streakSummary.textContent = "A streak e o bônus serão confirmados quando a conexão voltar.";
+          }
           saveStatus.textContent = resultado.sincronizado
-            ? "Pontos sincronizados com o ranking."
-            : "Pontos salvos neste navegador; não foi possível sincronizar.";
+            ? "Pontos e streak sincronizados com o ranking."
+            : resultado.erro?.includes("Worker foi atualizado")
+              ? "Atualize o Worker para sincronizar a streak; os pontos continuam salvos neste navegador."
+              : "Pontos salvos neste navegador; não foi possível sincronizar.";
           if (retryButton) retryButton.hidden = resultado.sincronizado;
         } catch (err) {
           console.error("Erro ao salvar automaticamente os pontos:", err);
@@ -1194,7 +1329,7 @@ async function abrirModal(vitoria) {
     modalBadge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20";
     modalTitle.textContent = "Tentativas Esgotadas";
     modalTitle.className = "text-xl font-bold text-white tracking-tight";
-    modalBody.textContent = "Não foi desta vez. Tente novamente!";
+    modalBody.textContent = "Não foi desta vez. Sua streak foi zerada; tente novamente!";
     modalBtnRestart.className = "w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs py-2.5 px-4 rounded-lg border border-slate-700 transition-all duration-200 cursor-pointer";
   }
 
@@ -1265,7 +1400,15 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-btnRestart.addEventListener("click", () => inicializarJogo(true));
+btnRestart.addEventListener("click", () => {
+  if (!EstadoJogo.fimDeJogo && gameIdPartida) {
+    registrarResultadoSemVitoria("abandon").catch((err) => {
+      console.error("Não foi possível registrar o abandono para a streak:", err);
+    });
+  }
+  localStorage.removeItem(STORAGE_GAME_ID_KEY);
+  inicializarJogo(true);
+});
 modalBtnRestart.addEventListener("click", () => inicializarJogo(true));
 
 function selecionarTema(tema) {
