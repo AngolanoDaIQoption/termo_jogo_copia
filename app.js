@@ -461,12 +461,21 @@ function formatarTempo(ms) {
 }
 
 function obterSemanaAtual() {
-  const data = new Date();
-  data.setHours(0, 0, 0, 0);
-  data.setDate(data.getDate() - (data.getDay() === 0 ? 6 : data.getDay() - 1));
-  const ano = data.getFullYear();
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  const dia = String(data.getDate()).padStart(2, "0");
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const obterParte = (tipo) => Number(partes.find((parte) => parte.type === tipo)?.value);
+  const anoLocal = obterParte("year");
+  const mesLocal = obterParte("month");
+  const diaLocal = obterParte("day");
+  const dataLocal = new Date(Date.UTC(anoLocal, mesLocal - 1, diaLocal));
+  const domingo = new Date(Date.UTC(anoLocal, mesLocal - 1, diaLocal - dataLocal.getUTCDay()));
+  const ano = domingo.getUTCFullYear();
+  const mes = String(domingo.getUTCMonth() + 1).padStart(2, "0");
+  const dia = String(domingo.getUTCDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
 }
 

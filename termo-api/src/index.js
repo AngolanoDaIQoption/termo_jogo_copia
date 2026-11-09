@@ -15,19 +15,28 @@ function getCorsHeaders(request) {
   };
 }
 
-function getSemanaAtual() {
-  const data = new Date();
-  data.setHours(0, 0, 0, 0);
-  data.setDate(data.getDate() - (data.getDay() === 0 ? 6 : data.getDay() - 1));
-  const ano = data.getFullYear();
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  const dia = String(data.getDate()).padStart(2, "0");
+export function getSemanaAtual(agora = new Date()) {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(agora);
+  const obterParte = (tipo) => Number(partes.find((parte) => parte.type === tipo)?.value);
+  const anoLocal = obterParte("year");
+  const mesLocal = obterParte("month");
+  const diaLocal = obterParte("day");
+  const dataLocal = new Date(Date.UTC(anoLocal, mesLocal - 1, diaLocal));
+  const domingo = new Date(Date.UTC(anoLocal, mesLocal - 1, diaLocal - dataLocal.getUTCDay()));
+  const ano = domingo.getUTCFullYear();
+  const mes = String(domingo.getUTCMonth() + 1).padStart(2, "0");
+  const dia = String(domingo.getUTCDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
 }
 
 async function sincronizarSemana(db) {
   const semanaAtual = getSemanaAtual();
-  const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaReset'").first();
+  const configReq = await db.prepare("SELECT value FROM system_config WHERE key = 'semanaResetDomingo'").first();
   const semanaReset = configReq ? configReq.value : "";
 
   if (semanaReset && semanaReset !== semanaAtual) {
@@ -35,7 +44,7 @@ async function sincronizarSemana(db) {
   }
 
   if (semanaReset !== semanaAtual) {
-    await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaReset', ?)").bind(semanaAtual).run();
+    await db.prepare("INSERT OR REPLACE INTO system_config (key, value) VALUES ('semanaResetDomingo', ?)").bind(semanaAtual).run();
   }
 
   return semanaAtual;

@@ -1,6 +1,6 @@
 import { env, createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import worker from "../src";
+import worker, { getSemanaAtual } from "../src";
 
 const MASTER_KEY = "test-master-key";
 
@@ -347,6 +347,38 @@ describe("POST /tempo", () => {
 		expect(blankId.data.erro).toBe("ID público ou dados de tempo inválidos.");
 	});
 
+	it("starts the week on Sunday at midnight in Sao Paulo", () => {
+		expect(getSemanaAtual(new Date("2026-11-08T02:59:59.000Z"))).toBe("2026-11-01");
+		expect(getSemanaAtual(new Date("2026-11-08T03:00:00.000Z"))).toBe("2026-11-08");
+		expect(getSemanaAtual(new Date("2026-11-15T02:59:59.000Z"))).toBe("2026-11-08");
+		expect(getSemanaAtual(new Date("2026-11-15T03:00:00.000Z"))).toBe("2026-11-15");
+	});
+
+	it("preserves existing times when initializing the Sunday reset marker", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, data_formatada) VALUES (NULL, 'ATUAL', 5000, 'doge', '08/11/2026')",
+			),
+			env.DB.prepare(
+				"INSERT INTO system_config (key, value) VALUES ('semanaReset', '2026-11-09')",
+			),
+		]);
+
+		const request = new Request("https://termo-api.test/", {
+			headers: { "X-Master-Key": MASTER_KEY },
+		});
+		const response = await worker.fetch(
+			request,
+			{ DB: env.DB, MASTER_KEY },
+			createExecutionContext(),
+		);
+		const data = await response.json();
+
+		expect(response.status).toBe(200);
+		expect(data.topTempos).toHaveLength(1);
+		expect(data.topTempos[0].nome).toBe("ATUAL");
+	});
+
 	it("resets weekly times without deleting general-score accounts", async () => {
 		await env.DB.batch([
 			env.DB.prepare(
@@ -357,6 +389,9 @@ describe("POST /tempo", () => {
 			),
 			env.DB.prepare(
 				"INSERT INTO system_config (key, value) VALUES ('semanaReset', '2000-01-03')",
+			),
+			env.DB.prepare(
+				"INSERT INTO system_config (key, value) VALUES ('semanaResetDomingo', '2000-01-02')",
 			),
 		]);
 
