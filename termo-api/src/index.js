@@ -86,13 +86,13 @@ export default {
 
         // Busca o Ranking Geral de Pontos
         const { results: pontos } = await db.prepare(
-          "SELECT pin, nome, pontos, avatar FROM jogadores ORDER BY pontos DESC"
+          "SELECT pin, nome, pontos, avatar, streak FROM jogadores ORDER BY pontos DESC"
         ).all();
 
         // Formata os dados no formato idêntico ao JSONBin para o front
         const pontuacaoGeral = {};
         pontos.forEach(p => {
-          pontuacaoGeral[p.pin] = { nome: p.nome, pontos: p.pontos, avatar: p.avatar };
+          pontuacaoGeral[p.pin] = { nome: p.nome, pontos: p.pontos, avatar: p.avatar, streak: p.streak };
         });
 
         topTempos.forEach(t => {
@@ -244,9 +244,26 @@ export default {
         const tempoMs = Number(body.tempoMs) || 0;
         const pontosGanhos = Number(body.pontosGanhos) || 0;
         const historico = Array.isArray(body.historico) ? body.historico : [];
-        const eventId = typeof body.eventId === "string" ? body.eventId.trim() : "";
+        const eventId = typeof body.eventId === "string" && body.eventId.trim()
+          ? body.eventId.trim()
+          : crypto.randomUUID();
+        const resultadoPartida = body.resultadoPartida || "win";
 
         // Validação: não pode jogar mais de 6 vezes, tempo deve ser positivo se for registrar tempo
+        if (!["win", "loss", "abandon"].includes(resultadoPartida)) {
+          return new Response(JSON.stringify({ erro: "Resultado de partida inválido." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (resultadoPartida !== "win" && (pontosGanhos !== 0 || body.registrarTempo)) {
+          return new Response(JSON.stringify({ erro: "Resultados sem vitória não podem conceder pontos ou tempo." }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
         if (body.registrarTempo && (tempoMs <= 0 || historico.length > 6)) {
           return new Response(JSON.stringify({ erro: "Dados de partida inválidos ou forjados." }), {
             status: 400,
@@ -261,7 +278,10 @@ export default {
           });
         }
 
-        if (body.eventId !== undefined && !/^[\w.-]{1,100}$/.test(eventId)) {
+        if (body.eventId !== undefined && (
+          typeof body.eventId !== "string" ||
+          !/^[\w.-]{1,100}$/.test(body.eventId.trim())
+        )) {
           return new Response(JSON.stringify({ erro: "Identificador de partida inválido." }), {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -273,84 +293,62 @@ export default {
 
         const avatar = body.avatar || "doge";
 
-        if (eventId) {
-          const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
-          const jogadorAnterior = await db.prepare(
-            "SELECT nome FROM jogadores WHERE pin = ?"
-          ).bind(pinUpper).first();
-          const resultado = await db.prepare(`
-            INSERT OR IGNORE INTO score_events (
-              event_id,
-              pin,
-              nome,
-              pontos,
-              avatar,
-              registrar_tempo,
-              tempo_ms,
-              historico_json,
-              data_formatada
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(
-            eventId,
-            pinUpper,
-            nomeUpper,
-            pontosGanhos,
-            avatar,
-            body.registrarTempo ? 1 : 0,
-            tempoMs,
-            JSON.stringify(historico),
-            dataStr
-          ).run();
-          let jogador = await db.prepare(
-            "SELECT pontos, nome FROM jogadores WHERE pin = ?"
-          ).bind(pinUpper).first();
-
-          if (jogadorAnterior && jogador && jogador.nome !== jogadorAnterior.nome) {
-            await db.prepare(
-              "UPDATE jogadores SET nome = ? WHERE pin = ?"
-            ).bind(jogadorAnterior.nome, pinUpper).run();
-            jogador = { ...jogador, nome: jogadorAnterior.nome };
-          }
-
-          return new Response(JSON.stringify({
-            sucesso: true,
-            duplicado: resultado.meta.changes === 0,
-            pontos: jogador ? jogador.pontos : 0,
-            nome: jogador ? jogador.nome : nomeUpper
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
-          });
-        }
-
-        // 3. Atualiza ou insere jogador acumulando os pontos
-        const jogadorExistente = await db.prepare(
-          "SELECT pontos, nome FROM jogadores WHERE pin = ?"
+        const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
+        const jogadorAnterior = await db.prepare(
+          "SELECT nome FROM jogadores WHERE pin = ?"
         ).bind(pinUpper).first();
-        const novosPontos = (jogadorExistente ? jogadorExistente.pontos : 0) + pontosGanhos;
-        const nomeAtual = jogadorExistente ? jogadorExistente.nome : nomeUpper;
+        const resultado = await db.prepare(`
+          INSERT OR IGNORE INTO score_events (
+            event_id,
+            pin,
+            nome,
+            pontos,
+            avatar,
+            registrar_tempo,
+            tempo_ms,
+            historico_json,
+            data_formatada,
+            resultado_partida
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          eventId,
+          pinUpper,
+          nomeUpper,
+          pontosGanhos,
+          avatar,
+          body.registrarTempo ? 1 : 0,
+          tempoMs,
+          JSON.stringify(historico),
+          dataStr,
+          resultadoPartida
+        ).run();
+        let jogador = await db.prepare(
+          "SELECT pontos, nome, streak FROM jogadores WHERE pin = ?"
+        ).bind(pinUpper).first();
+        const eventoPontuacao = await db.prepare(
+          "SELECT pontos_efetivos, streak_apos FROM score_events WHERE event_id = ?"
+        ).bind(eventId).first();
 
-        await db.prepare(`
-          INSERT INTO jogadores (pin, nome, pontos, avatar, updated_at)
-          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(pin) DO UPDATE SET
-            nome = ?,
-            pontos = ?,
-            avatar = excluded.avatar,
-            updated_at = CURRENT_TIMESTAMP
-        `).bind(pinUpper, nomeAtual, novosPontos, avatar, nomeAtual, novosPontos).run();
-
-        // 4. Se registrar tempo semanal
-        if (body.registrarTempo && tempoMs > 0) {
-          const histStr = JSON.stringify(historico);
-          const dataStr = body.data || new Date().toLocaleDateString("pt-BR");
-          await db.prepare(`
-            INSERT INTO partidas (jogador_pin, nome_display, tempo_ms, avatar, historico_json, data_formatada)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(pinUpper, nomeAtual, tempoMs, avatar, histStr, dataStr).run();
+        if (jogadorAnterior && jogador && jogador.nome !== jogadorAnterior.nome) {
+          await db.prepare(
+            "UPDATE jogadores SET nome = ? WHERE pin = ?"
+          ).bind(jogadorAnterior.nome, pinUpper).run();
+          jogador = { ...jogador, nome: jogadorAnterior.nome };
         }
 
-        return new Response(JSON.stringify({ sucesso: true, pontos: novosPontos }), {
+        return new Response(JSON.stringify({
+          sucesso: true,
+          duplicado: resultado.meta.changes === 0,
+          pontos: jogador ? jogador.pontos : 0,
+          nome: jogador ? jogador.nome : nomeUpper,
+          pontosGanhos: eventoPontuacao ? eventoPontuacao.pontos_efetivos : 0,
+          streak: eventoPontuacao ? eventoPontuacao.streak_apos : jogador?.streak || 0,
+          streakAtual: jogador?.streak || 0,
+          multiplicador: eventoPontuacao && eventoPontuacao.streak_apos > 0
+            ? Math.min(eventoPontuacao.streak_apos + 3, 8) / 4
+            : 1
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       } catch (err) {

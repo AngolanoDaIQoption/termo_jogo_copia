@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS jogadores (
     nome TEXT NOT NULL,
     pontos INTEGER NOT NULL DEFAULT 0,
     avatar TEXT NOT NULL,
+    streak INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -42,18 +43,41 @@ CREATE TABLE IF NOT EXISTS score_events (
     tempo_ms INTEGER NOT NULL DEFAULT 0,
     historico_json TEXT NOT NULL DEFAULT '[]',
     data_formatada TEXT NOT NULL,
+    resultado_partida TEXT NOT NULL DEFAULT 'win',
+    pontos_efetivos INTEGER NOT NULL DEFAULT 0,
+    streak_apos INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TRIGGER IF NOT EXISTS score_events_after_insert
 AFTER INSERT ON score_events
 BEGIN
-    INSERT INTO jogadores (pin, nome, pontos, avatar, updated_at)
-    VALUES (NEW.pin, NEW.nome, NEW.pontos, NEW.avatar, CURRENT_TIMESTAMP)
+    UPDATE score_events
+    SET
+        pontos_efetivos = CASE
+            WHEN NEW.resultado_partida = 'win' THEN
+                (NEW.pontos * MIN(COALESCE((SELECT streak FROM jogadores WHERE pin = NEW.pin), 0) + 4, 8) + 2) / 4
+            ELSE 0
+        END,
+        streak_apos = CASE
+            WHEN NEW.resultado_partida = 'win' THEN COALESCE((SELECT streak FROM jogadores WHERE pin = NEW.pin), 0) + 1
+            ELSE 0
+        END
+    WHERE event_id = NEW.event_id;
+
+    INSERT INTO jogadores (pin, nome, pontos, avatar, streak, updated_at)
+    VALUES (
+        NEW.pin,
+        NEW.nome,
+        (SELECT pontos_efetivos FROM score_events WHERE event_id = NEW.event_id),
+        NEW.avatar,
+        (SELECT streak_apos FROM score_events WHERE event_id = NEW.event_id),
+        CURRENT_TIMESTAMP
+    )
     ON CONFLICT(pin) DO UPDATE SET
-        nome = NEW.nome,
-        pontos = jogadores.pontos + NEW.pontos,
-        avatar = NEW.avatar,
+        pontos = jogadores.pontos + excluded.pontos,
+        avatar = excluded.avatar,
+        streak = excluded.streak,
         updated_at = CURRENT_TIMESTAMP;
 
     INSERT INTO partidas (
@@ -71,5 +95,5 @@ BEGIN
         NEW.avatar,
         NEW.historico_json,
         NEW.data_formatada
-    WHERE NEW.registrar_tempo = 1 AND NEW.tempo_ms > 0;
+    WHERE NEW.resultado_partida = 'win' AND NEW.registrar_tempo = 1 AND NEW.tempo_ms > 0;
 END;

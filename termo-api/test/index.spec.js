@@ -4,6 +4,13 @@ import worker, { getSemanaAtual } from "../src";
 
 const MASTER_KEY = "test-master-key";
 
+async function ensureColumn(table, column, definition) {
+	const { results } = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+	if (!results.some((item) => item.name === column)) {
+		await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+	}
+}
+
 async function salvarEvento(body, key = MASTER_KEY) {
 	const request = new Request("https://termo-api.test/salvar", {
 		method: "POST",
@@ -74,30 +81,57 @@ async function atualizarNick(body, key = MASTER_KEY) {
 
 describe("POST /salvar idempotent score events", () => {
 	beforeEach(async () => {
+		await env.DB.prepare("DROP TRIGGER IF EXISTS score_events_after_insert").run();
 		await env.DB.batch([
 			env.DB.prepare(
 				"CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 			),
 			env.DB.prepare(
-				"CREATE TABLE IF NOT EXISTS jogadores (pin TEXT PRIMARY KEY, nome TEXT NOT NULL, pontos INTEGER NOT NULL DEFAULT 0, avatar TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+				"CREATE TABLE IF NOT EXISTS jogadores (pin TEXT PRIMARY KEY, nome TEXT NOT NULL, pontos INTEGER NOT NULL DEFAULT 0, avatar TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
 			),
 			env.DB.prepare(
 				"CREATE TABLE IF NOT EXISTS partidas (id INTEGER PRIMARY KEY AUTOINCREMENT, jogador_pin TEXT, nome_display TEXT NOT NULL, tempo_ms INTEGER NOT NULL, avatar TEXT NOT NULL, historico_json TEXT, data_formatada TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (jogador_pin) REFERENCES jogadores(pin) ON DELETE SET NULL)",
 			),
 			env.DB.prepare(
-				"CREATE TABLE IF NOT EXISTS score_events (event_id TEXT PRIMARY KEY, pin TEXT NOT NULL, nome TEXT NOT NULL, pontos INTEGER NOT NULL CHECK (pontos >= 0 AND pontos <= 100), avatar TEXT NOT NULL, registrar_tempo INTEGER NOT NULL DEFAULT 0, tempo_ms INTEGER NOT NULL DEFAULT 0, historico_json TEXT NOT NULL DEFAULT '[]', data_formatada TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+				"CREATE TABLE IF NOT EXISTS score_events (event_id TEXT PRIMARY KEY, pin TEXT NOT NULL, nome TEXT NOT NULL, pontos INTEGER NOT NULL CHECK (pontos >= 0 AND pontos <= 100), avatar TEXT NOT NULL, registrar_tempo INTEGER NOT NULL DEFAULT 0, tempo_ms INTEGER NOT NULL DEFAULT 0, historico_json TEXT NOT NULL DEFAULT '[]', data_formatada TEXT NOT NULL, resultado_partida TEXT NOT NULL DEFAULT 'win', pontos_efetivos INTEGER NOT NULL DEFAULT 0, streak_apos INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
 			),
 		]);
+		await ensureColumn("jogadores", "streak", "INTEGER NOT NULL DEFAULT 0");
+		await ensureColumn("score_events", "resultado_partida", "TEXT NOT NULL DEFAULT 'win'");
+		await ensureColumn("score_events", "pontos_efetivos", "INTEGER NOT NULL DEFAULT 0");
+		await ensureColumn("score_events", "streak_apos", "INTEGER NOT NULL DEFAULT 0");
+		await env.DB.prepare("UPDATE score_events SET pontos_efetivos = pontos WHERE pontos_efetivos = 0 AND resultado_partida = 'win'").run();
 		await env.DB.prepare(`
-			CREATE TRIGGER IF NOT EXISTS score_events_after_insert
+			CREATE TRIGGER score_events_after_insert
 			AFTER INSERT ON score_events
 			BEGIN
-				INSERT INTO jogadores (pin, nome, pontos, avatar, updated_at)
-				VALUES (NEW.pin, NEW.nome, NEW.pontos, NEW.avatar, CURRENT_TIMESTAMP)
+				UPDATE score_events
+				SET
+					pontos_efetivos = CASE
+						WHEN NEW.resultado_partida = 'win' THEN
+							(NEW.pontos * MIN(COALESCE((SELECT streak FROM jogadores WHERE pin = NEW.pin), 0) + 4, 8) + 2) / 4
+						ELSE 0
+					END,
+					streak_apos = CASE
+						WHEN NEW.resultado_partida = 'win' THEN COALESCE((SELECT streak FROM jogadores WHERE pin = NEW.pin), 0) + 1
+						ELSE 0
+					END
+				WHERE event_id = NEW.event_id;
+
+				INSERT INTO jogadores (pin, nome, pontos, avatar, streak, updated_at)
+				VALUES (
+					NEW.pin,
+					NEW.nome,
+					(SELECT pontos_efetivos FROM score_events WHERE event_id = NEW.event_id),
+					NEW.avatar,
+					(SELECT streak_apos FROM score_events WHERE event_id = NEW.event_id),
+					CURRENT_TIMESTAMP
+				)
 				ON CONFLICT(pin) DO UPDATE SET
 					nome = NEW.nome,
-					pontos = jogadores.pontos + NEW.pontos,
-					avatar = NEW.avatar,
+					pontos = jogadores.pontos + excluded.pontos,
+					avatar = excluded.avatar,
+					streak = excluded.streak,
 					updated_at = CURRENT_TIMESTAMP;
 
 				INSERT INTO partidas (
@@ -115,7 +149,7 @@ describe("POST /salvar idempotent score events", () => {
 					NEW.avatar,
 					NEW.historico_json,
 					NEW.data_formatada
-				WHERE NEW.registrar_tempo = 1 AND NEW.tempo_ms > 0;
+				WHERE NEW.resultado_partida = 'win' AND NEW.registrar_tempo = 1 AND NEW.tempo_ms > 0;
 			END
 		`).run();
 		await env.DB.batch([
@@ -142,7 +176,7 @@ describe("POST /salvar idempotent score events", () => {
 		const first = await salvarEvento(event);
 		const retry = await salvarEvento(event);
 		const player = await env.DB.prepare(
-			"SELECT pontos FROM jogadores WHERE pin = ?",
+			"SELECT pontos, streak FROM jogadores WHERE pin = ?",
 		)
 			.bind(event.pin)
 			.first();
@@ -162,8 +196,96 @@ describe("POST /salvar idempotent score events", () => {
 		expect(retry.response.status).toBe(200);
 		expect(retry.data.duplicado).toBe(true);
 		expect(player.pontos).toBe(20);
+		expect(player.streak).toBe(1);
+		expect(retry.data.pontosGanhos).toBe(20);
 		expect(eventCount.total).toBe(1);
 		expect(recordCount.total).toBe(1);
+	});
+
+	it("applies the capped streak multiplier and resets it after a loss", async () => {
+		const baseEvent = {
+			nome: "JOGADOR",
+			pin: "PIN-STREAK",
+			tempoMs: 5000,
+			avatar: "doge",
+			registrarTempo: false,
+			pontosGanhos: 40,
+			historico: ["GRATO"],
+			data: "08/11/2026",
+		};
+
+		const results = [];
+		for (let streak = 1; streak <= 6; streak++) {
+			results.push(await salvarEvento({ ...baseEvent, eventId: `streak-win-${streak}` }));
+		}
+		const loss = await salvarEvento({
+			...baseEvent,
+			eventId: "streak-loss",
+			tempoMs: 0,
+			pontosGanhos: 0,
+			resultadoPartida: "loss",
+		});
+		const nextWin = await salvarEvento({ ...baseEvent, eventId: "streak-after-loss" });
+		const player = await env.DB.prepare(
+			"SELECT pontos, streak FROM jogadores WHERE pin = 'PIN-STREAK'",
+		).first();
+
+		expect(results.map((result) => result.data.pontosGanhos)).toEqual([40, 50, 60, 70, 80, 80]);
+		expect(results.map((result) => result.data.streak)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(results[5].data.multiplicador).toBe(2);
+		expect(loss.data.streak).toBe(0);
+		expect(nextWin.data.streak).toBe(1);
+		expect(player.streak).toBe(1);
+		expect(player.pontos).toBe(420);
+	});
+
+	it("makes a duplicate loss idempotent", async () => {
+		await salvarEvento({
+			eventId: "streak-before-abandon",
+			nome: "JOGADOR",
+			pin: "PIN-ABANDON",
+			pontosGanhos: 10,
+			avatar: "doge",
+			registrarTempo: false,
+		});
+		const abandon = {
+			eventId: "streak-abandon",
+			nome: "JOGADOR",
+			pin: "PIN-ABANDON",
+			pontosGanhos: 0,
+			avatar: "doge",
+			registrarTempo: false,
+			resultadoPartida: "abandon",
+		};
+
+		const first = await salvarEvento(abandon);
+		const retry = await salvarEvento(abandon);
+		const player = await env.DB.prepare(
+			"SELECT pontos, streak FROM jogadores WHERE pin = 'PIN-ABANDON'",
+		).first();
+
+		expect(first.data.duplicado).toBe(false);
+		expect(retry.data.duplicado).toBe(true);
+		expect(player.pontos).toBe(10);
+		expect(player.streak).toBe(0);
+	});
+
+	it("routes legacy saves without event IDs through streak scoring", async () => {
+		const result = await salvarEvento({
+			nome: "JOGADOR",
+			pin: "PIN-LEGACY",
+			pontosGanhos: 10,
+			avatar: "doge",
+			registrarTempo: false,
+		});
+		const player = await env.DB.prepare(
+			"SELECT pontos, streak FROM jogadores WHERE pin = 'PIN-LEGACY'",
+		).first();
+
+		expect(result.response.status).toBe(200);
+		expect(result.data.pontosGanhos).toBe(10);
+		expect(player.pontos).toBe(10);
+		expect(player.streak).toBe(1);
 	});
 
 	it("accumulates points for distinct events from the same player", async () => {
@@ -187,7 +309,8 @@ describe("POST /salvar idempotent score events", () => {
 			.first();
 
 		expect(second.data.duplicado).toBe(false);
-		expect(player.pontos).toBe(20);
+		expect(player.pontos).toBe(23);
+		expect(second.data.pontosGanhos).toBe(13);
 	});
 
 	it("updates the profile nickname without changing points", async () => {
@@ -251,6 +374,26 @@ describe("POST /salvar idempotent score events", () => {
 		expect(result.data.erro).toBe("Identificador de partida inválido.");
 	});
 
+	it("rejects invalid outcomes and points on non-winning results", async () => {
+		const invalidOutcome = await salvarEvento({
+			eventId: "invalid-outcome",
+			nome: "JOGADOR",
+			pin: "PIN-INVALID",
+			pontosGanhos: 0,
+			resultadoPartida: "draw",
+		});
+		const pointsOnLoss = await salvarEvento({
+			eventId: "points-on-loss",
+			nome: "JOGADOR",
+			pin: "PIN-INVALID",
+			pontosGanhos: 10,
+			resultadoPartida: "loss",
+		});
+
+		expect(invalidOutcome.response.status).toBe(400);
+		expect(pointsOnLoss.response.status).toBe(400);
+	});
+
 	it("requires the master key", async () => {
 		const result = await salvarEvento({
 			eventId: "game-unique-004",
@@ -270,7 +413,7 @@ describe("POST /tempo", () => {
 				"CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 			),
 			env.DB.prepare(
-				"CREATE TABLE IF NOT EXISTS jogadores (pin TEXT PRIMARY KEY, nome TEXT NOT NULL, pontos INTEGER NOT NULL DEFAULT 0, avatar TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+				"CREATE TABLE IF NOT EXISTS jogadores (pin TEXT PRIMARY KEY, nome TEXT NOT NULL, pontos INTEGER NOT NULL DEFAULT 0, avatar TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
 			),
 			env.DB.prepare(
 				"CREATE TABLE IF NOT EXISTS partidas (id INTEGER PRIMARY KEY AUTOINCREMENT, jogador_pin TEXT, nome_display TEXT NOT NULL, tempo_ms INTEGER NOT NULL, avatar TEXT NOT NULL, historico_json TEXT, data_formatada TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (jogador_pin) REFERENCES jogadores(pin) ON DELETE SET NULL)",
@@ -279,6 +422,7 @@ describe("POST /tempo", () => {
 			env.DB.prepare("DELETE FROM jogadores"),
 			env.DB.prepare("DELETE FROM system_config"),
 		]);
+		await ensureColumn("jogadores", "streak", "INTEGER NOT NULL DEFAULT 0");
 	});
 
 	describe("POST /perfil/avatar", () => {
